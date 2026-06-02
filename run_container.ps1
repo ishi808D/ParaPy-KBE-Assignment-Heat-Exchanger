@@ -174,7 +174,7 @@ if ($Detach) {
 $runArgs += $ImageTag
 
 # Activate conda env, then start the gRPC server from the cloned MTO repo.
-$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && cd /workspace/MTO && python grpc_server/server.py --port 50051"
+$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && cd /workspace/MTO && python 3Dheatsink_gyroid/grpc_server/server.py --port 50051"
 $runArgs += @("/bin/bash", "-c", $serverCmd)
 
 # ── run ───────────────────────────────────────────────────────────────────────

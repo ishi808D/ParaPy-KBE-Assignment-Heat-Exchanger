@@ -124,6 +124,20 @@ RUN echo "source /opt/openfoam11/etc/bashrc" >> /etc/bash.bashrc
 
 USER vscode
 
+WORKDIR ${WORKSPACE}/MTO
+
+RUN git pull
+
+# Regenerate protobuf stubs so gencode version always matches the installed
+# runtime (avoids VersionError when grpcio-tools and protobuf runtime diverge).
+RUN source /opt/conda/etc/profile.d/conda.sh \
+    && conda activate OFTPMSoptimiser \
+    && python -m grpc_tools.protoc \
+        -I 3Dheatsink_gyroid/grpc_server \
+        --python_out=3Dheatsink_gyroid/grpc_server \
+        --grpc_python_out=3Dheatsink_gyroid/grpc_server \
+        3Dheatsink_gyroid/grpc_server/gyroid_service.proto
+
 EXPOSE 8080 50051
 
 CMD ["/bin/bash"]
