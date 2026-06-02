@@ -37,3 +37,7 @@ python client.py help
 
 Use the **Containers** extension in VS Code to see what is happening inside the container.
 Attach VS Code to the running container to inspect the environment and runtime behavior directly.
+
+
+## TODO
+Create a ParaPy GUI using the parapy tools, also use wxformbuilder (see https://parapy.nl/docs/parapy/latest/tutorials/gui_widgets.html?highlight=wxformbuilder) and (ai.parapy.nl). Let the GUI follow the steps described in the KBE Proposal Document
