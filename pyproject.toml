@@ -18,6 +18,10 @@ dependencies = [
     "pyqt6",
     #"matlabengine==25.1",# version must match installed matlab version
     "cairocffi",
+    "grpcio==1.81.0",
+    "grpcio-tools==1.81.0",
+    "protobuf==6.33.6",
+    "setuptools==82.0.1",
 ]
 
 
@@ -50,3 +54,8 @@ url = "https://pypi.parapy.nl/simple/"
 name = "pypi"
 verify_ssl = true
 url = "https://pypi.org/simple"
+
+[tool.uv.workspace]
+members = [
+    "parapygui",
+]
