@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bio-Inspired Heat Exchanger — KBE</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg:       #070b0f;
+    --panel:    #0d1318;
+    --border:   #1a2530;
+    --accent:   #00c8a0;
+    --accent2:  #0090ff;
+    --warn:     #ff6b35;
+    --text:     #c8d8e0;
+    --muted:    #4a6070;
+    --mono:     'Space Mono', monospace;
+    --sans:     'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+
+  /* ── layout ── */
+  #app { display: grid; grid-template-columns: 320px 1fr 280px; grid-template-rows: 48px 1fr 180px; height: 100vh; gap: 0; }
+
+  /* ── header ── */
+  header { grid-column: 1/-1; display: flex; align-items: center; padding: 0 20px; gap: 16px;
+           border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; color: var(--accent); }
+  header .sub { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; transition: background .3s; }
+  .dot.ok  { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot.err { background: var(--warn);   box-shadow: 0 0 8px var(--warn); }
+  #server-label { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  /* ── left panel ── */
+  #controls { background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+  .section-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; color: var(--muted);
+                   text-transform: uppercase; margin: 16px 0 10px; padding-bottom: 6px;
+                   border-bottom: 1px solid var(--border); }
+  .section-title:first-child { margin-top: 0; }
+
+  .param { margin-bottom: 12px; }
+  .param label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted);
+                 font-family: var(--mono); margin-bottom: 4px; }
+  .param label span { color: var(--accent); }
+  input[type=range] { width: 100%; height: 3px; background: var(--border); border-radius: 2px;
+                       outline: none; -webkit-appearance: none; cursor: pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
+  select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+           font-family: var(--mono); font-size: 11px; padding: 6px 8px; border-radius: 3px; cursor: pointer; }
+
+  /* ── 3D viewport ── */
+  #viewport { position: relative; background: #03070a; overflow: hidden; }
+  #three-canvas { width: 100% !important; height: 100% !important; display: block; }
+  #viewport-overlay { position: absolute; bottom: 12px; left: 12px; display: flex; gap: 8px; }
+  .tag { font-family: var(--mono); font-size: 10px; padding: 4px 8px;
+         background: rgba(0,0,0,.6); border: 1px solid var(--border);
+         border-radius: 2px; backdrop-filter: blur(4px); }
+  .tag.accent { color: var(--accent); border-color: var(--accent); }
+  #loading-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                  font-family: var(--mono); font-size: 12px; color: var(--muted); background: rgba(3,7,10,.8);
+                  pointer-events: none; transition: opacity .3s; }
+
+  /* ── right panel — metrics ── */
+  #metrics { background: var(--panel); border-left: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+  .metric { margin-bottom: 10px; }
+  .metric-name  { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .metric-value { font-family: var(--mono); font-size: 20px; color: var(--accent); line-height: 1.1; }
+  .metric-unit  { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .metric.warn .metric-value { color: var(--warn); }
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+  /* ── bottom — workflow ── */
+  #workflow { grid-column: 1/-1; background: var(--panel); border-top: 1px solid var(--border);
+              display: flex; align-items: stretch; padding: 12px 20px; gap: 12px; }
+  .wf-step { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 10px 14px;
+              border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: all .2s; }
+  .wf-step:hover { border-color: var(--accent); background: rgba(0,200,160,.04); }
+  .wf-step.active { border-color: var(--accent); background: rgba(0,200,160,.08); }
+  .wf-step.running { border-color: var(--accent2); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(0,144,255,.3); } 50% { box-shadow: 0 0 0 6px rgba(0,144,255,.0); } }
+  .wf-num  { font-family: var(--mono); font-size: 9px; color: var(--muted); }
+  .wf-name { font-family: var(--mono); font-size: 11px; color: var(--text); }
+  .wf-desc { font-size: 10px; color: var(--muted); line-height: 1.4; }
+  .btn { padding: 6px 14px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em;
+         background: transparent; border: 1px solid var(--accent); color: var(--accent);
+         border-radius: 2px; cursor: pointer; transition: all .15s; }
+  .btn:hover { background: var(--accent); color: var(--bg); }
+  .btn.danger { border-color: var(--warn); color: var(--warn); }
+  .btn.danger:hover { background: var(--warn); color: var(--bg); }
+  .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ── convergence chart ── */
+  #chart-wrap { width: 100%; height: 110px; position: relative; }
+  #conv-chart { width: 100% !important; height: 100% !important; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── header ── -->
+  <header>
+    <h1>BIO-INSPIRED HEAT EXCHANGER</h1>
+    <span class="sub">KBE · TU Delft AE4204 · Team 16</span>
+    <span id="server-label">GRPC ──</span>
+    <div class="dot" id="server-dot"></div>
+  </header>
+
+  <!-- ── left: controls ── -->
+  <div id="controls">
+    <div class="section-title">Geometry</div>
+    <div class="param"><label>Length (mm) <span id="lv">100</span></label>
+      <input type="range" id="enc_length" min="20" max="300" value="100" step="5"></div>
+    <div class="param"><label>Width (mm) <span id="wv">50</span></label>
+      <input type="range" id="enc_width" min="10" max="150" value="50" step="5"></div>
+    <div class="param"><label>Height (mm) <span id="hv">50</span></label>
+      <input type="range" id="enc_height" min="10" max="150" value="50" step="5"></div>
+    <div class="param"><label>Wall (mm) <span id="wtv">2</span></label>
+      <input type="range" id="enc_wall" min="0.5" max="10" value="2" step="0.5"></div>
+
+    <div class="section-title">Lattice</div>
+    <div class="param"><label>TPMS Type</label>
+      <select id="tpms_type">
+        <option value="gyroid">Gyroid</option>
+        <option value="schwartz_p">Schwartz P</option>
+        <option value="diamond">Diamond</option>
+      </select>
+    </div>
+    <div class="param"><label>Unit Cell (mm) <span id="ucv">10.0</span></label>
+      <input type="range" id="unit_cell" min="3" max="40" value="10" step="1"></div>
+    <div class="param"><label>Iso Level (wall thickness) <span id="isov">0.30</span></label>
+      <input type="range" id="iso_level" min="0.05" max="0.60" value="0.30" step="0.01"></div>
+
+    <div class="section-title">Flow Conditions</div>
+    <div class="param"><label>Inlet velocity (m/s) <span id="vv">1.0</span></label>
+      <input type="range" id="inflow_vel" min="0.1" max="10" value="1" step="0.1"></div>
+    <div class="param"><label>Inlet temp (K) <span id="tv">350</span></label>
+      <input type="range" id="inflow_temp" min="300" max="600" value="350" step="5"></div>
+
+    <div class="section-title">3D Preview</div>
+    <div class="param"><label>Resolution <span id="resv">50</span></label>
+      <input type="range" id="resolution" min="20" max="80" value="50" step="5"></div>
+    <button class="btn" id="btn-update3d" style="width:100%;margin-top:4px">UPDATE 3D MESH</button>
+  </div>
+
+  <!-- ── centre: 3D viewport ── -->
+  <div id="viewport">
+    <canvas id="three-canvas"></canvas>
+    <div id="loading-msg">Adjust parameters and click UPDATE 3D MESH</div>
+    <div id="viewport-overlay">
+      <span class="tag accent" id="tag-tris">─ tris</span>
+      <span class="tag" id="tag-sol">─ φ</span>
+      <span class="tag" id="tag-mass">─ g</span>
+    </div>
+  </div>
+
+  <!-- ── right: metrics ── -->
+  <div id="metrics">
+    <div class="section-title">Thermal-Hydraulic</div>
+    <div class="metric"><div class="metric-name">Reynolds</div>
+      <div class="metric-value" id="m-re">—</div></div>
+    <div class="metric"><div class="metric-name">Prandtl</div>
+      <div class="metric-value" id="m-pr">—</div></div>
+    <div class="metric"><div class="metric-name">Nu (turbulent)</div>
+      <div class="metric-value" id="m-nu">—</div></div>
+    <div class="metric"><div class="metric-name">h [W/m²K]</div>
+      <div class="metric-value" id="m-h">—</div></div>
+    <div class="divider"></div>
+    <div class="section-title">Lattice</div>
+    <div class="metric"><div class="metric-name">Solidity φ</div>
+      <div class="metric-value" id="m-sol">—</div></div>
+    <div class="metric"><div class="metric-name">Required φ</div>
+      <div class="metric-value" id="m-req">—</div></div>
+    <div class="metric"><div class="metric-name">Mass</div>
+      <div class="metric-value" id="m-mass">— <span class="metric-unit">g</span></div></div>
+    <div class="divider"></div>
+    <div class="section-title">DfAM</div>
+    <div class="metric" id="mfg-wall"><div class="metric-name">Est. wall</div>
+      <div class="metric-value" id="m-wall">— <span class="metric-unit">mm</span></div></div>
+    <div class="divider"></div>
+    <div class="section-title">Convergence</div>
+    <div id="chart-wrap"><canvas id="conv-chart"></canvas></div>
+    <button class="btn" id="btn-history" style="width:100%;margin-top:8px;font-size:9px">REFRESH HISTORY</button>
+  </div>
+
+  <!-- ── bottom: workflow steps ── -->
+  <div id="workflow">
+    <div class="wf-step active" id="step-geom">
+      <div class="wf-num">01</div>
+      <div class="wf-name">GEOMETRY</div>
+      <div class="wf-desc">Define envelope, inlet/outlet, lattice parameters</div>
+    </div>
+    <div class="wf-step" id="step-baseline">
+      <div class="wf-num">02</div>
+      <div class="wf-name">BASELINE SIM</div>
+      <div class="wf-desc">Uniform lattice · single OpenFOAM run</div>
+      <button class="btn" id="btn-baseline">RUN</button>
+    </div>
+    <div class="wf-step" id="step-opt">
+      <div class="wf-num">03</div>
+      <div class="wf-name">OPTIMISE</div>
+      <div class="wf-desc">MTO adjoint loop · graded wavenumber field</div>
+      <button class="btn" id="btn-opt">START</button>
+    </div>
+    <div class="wf-step" id="step-export">
+      <div class="wf-num">04</div>
+      <div class="wf-name">EXPORT</div>
+      <div class="wf-desc">STL for printing · STEP for CAD · PDF report</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" id="btn-stl">STL</button>
+        <button class="btn" id="btn-report">PDF</button>
+        <button class="btn danger" id="btn-stop">STOP SIM</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Three.js + STL Loader -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── Three.js STL Loader (minimal, from Three.js examples) ──────────
+THREE.STLLoader = function(manager) { this.manager = manager || THREE.DefaultLoadingManager; };
+THREE.STLLoader.prototype = {
+  load: function(url, onLoad, onProgress, onError) {
+    var scope = this;
+    var loader = new THREE.FileLoader(scope.manager);
+    loader.setResponseType('arraybuffer');
+    loader.load(url, function(text) { onLoad(scope.parse(text)); }, onProgress, onError);
+  },
+  loadFromBuffer: function(buf) { return this.parse(buf); },
+  parse: function(data) {
+    var isBinary = function(data) {
+      var expect, face_size, n_faces, reader;
+      reader = new DataView(data);
+      face_size = (32 / 8 * 3) + ((32 / 8 * 3) * 3) + (16 / 8);
+      n_faces = reader.getUint32(80, true);
+      expect = 80 + (32 / 8) + (n_faces * face_size);
+      if (expect === reader.byteLength) return true;
+      for (var i = 0, l = 80; i < l; i++) {
+        if (reader.getUint8(i, false) > 127) return true;
+      }
+      return false;
+    };
+    var binData = this.ensureBinary(data);
+    return isBinary(binData) ? this.parseBinary(binData) : this.parseASCII(this.ensureString(data));
+  },
+  parseBinary: function(data) {
+    var reader = new DataView(data);
+    var faces = reader.getUint32(80, true);
+    var r, c, normal, string, defaultR, defaultG, defaultB, index, dataOffset, faceLength, start, vertices;
+    var geometry = new THREE.BufferGeometry();
+    var position = []; var normals = [];
+    for (var face = 0; face < faces; face++) {
+      var start = 84 + face * 50;
+      normals.push(reader.getFloat32(start, true), reader.getFloat32(start + 4, true), reader.getFloat32(start + 8, true));
+      for (var i = 1; i <= 3; i++) {
+        var vertexstart = start + i * 12;
+        position.push(reader.getFloat32(vertexstart, true), reader.getFloat32(vertexstart + 4, true), reader.getFloat32(vertexstart + 8, true));
+        normals.push(reader.getFloat32(start, true), reader.getFloat32(start + 4, true), reader.getFloat32(start + 8, true));
+      }
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(position), 3));
+    // recompute normals properly
+    geometry.computeVertexNormals();
+    return geometry;
+  },
+  parseASCII: function(data) { return new THREE.BufferGeometry(); },
+  ensureBinary: function(buf) {
+    if (typeof buf === 'string') {
+      var a = new Uint8Array(buf.length);
+      for (var i=0; i<buf.length; i++) a[i] = buf.charCodeAt(i) & 0xff;
+      return a.buffer;
+    }
+    return buf;
+  },
+  ensureString: function(buf) {
+    if (typeof buf === 'string') return buf;
+    return new TextDecoder().decode(buf);
+  }
+};
+</script>
+
+<!-- Chart.js for convergence -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════
+// THREE.JS SCENE SETUP
+// ════════════════════════════════════════════════════════
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x03070a, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.0001, 100);
+camera.position.set(0.15, 0.1, 0.15);
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x334455, 0.8));
+const dL = new THREE.DirectionalLight(0x00c8a0, 1.2); dL.position.set(1,2,1); scene.add(dL);
+const dL2 = new THREE.DirectionalLight(0x0090ff, 0.6); dL2.position.set(-1,-1,0.5); scene.add(dL2);
+
+// Grid
+const grid = new THREE.GridHelper(1, 20, 0x1a2530, 0x1a2530); scene.add(grid);
+
+// Orbit controls (minimal)
+let isDragging = false, lastX = 0, lastY = 0;
+let theta = 0.8, phi = 0.6, radius = 0.25;
+canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('mouseup', () => isDragging = false);
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  theta -= (e.clientX - lastX) * 0.005;
+  phi   -= (e.clientY - lastY) * 0.005;
+  phi = Math.max(0.1, Math.min(Math.PI/2 - 0.05, phi));
+  lastX = e.clientX; lastY = e.clientY;
+  camera.position.set(radius*Math.sin(theta)*Math.cos(phi), radius*Math.sin(phi), radius*Math.cos(theta)*Math.cos(phi));
+  camera.lookAt(0, 0, 0);
+});
+canvas.addEventListener('wheel', e => {
+  radius = Math.max(0.05, Math.min(1, radius + e.deltaY * 0.0003));
+  camera.position.set(radius*Math.sin(theta)*Math.cos(phi), radius*Math.sin(phi), radius*Math.cos(theta)*Math.cos(phi));
+  camera.lookAt(0, 0, 0);
+  e.preventDefault();
+}, { passive: false });
+
+let currentMesh = null;
+
+function loadSTLBuffer(buffer, metrics) {
+  if (currentMesh) { scene.remove(currentMesh); currentMesh.geometry.dispose(); }
+  const loader = new THREE.STLLoader();
+  const geo = loader.loadFromBuffer(buffer);
+  geo.center();
+  const mat = new THREE.MeshPhongMaterial({
+    color: 0x00c8a0, specular: 0x1a4040, shininess: 60,
+    wireframe: false, side: THREE.DoubleSide, transparent: true, opacity: 0.92
+  });
+  currentMesh = new THREE.Mesh(geo, mat);
+  const box = new THREE.Box3().setFromObject(currentMesh);
+  const sz = new THREE.Vector3(); box.getSize(sz);
+  const scale = 0.15 / Math.max(sz.x, sz.y, sz.z);
+  currentMesh.scale.setScalar(scale);
+  scene.add(currentMesh);
+
+  // Update tags
+  if (metrics) {
+    document.getElementById('tag-tris').textContent = (metrics.n_triangles/1000).toFixed(0) + 'k tris';
+    document.getElementById('tag-sol').textContent  = 'φ=' + metrics.solidity;
+    document.getElementById('tag-mass').textContent = metrics.mass_g + 'g';
+  }
+  document.getElementById('loading-msg').style.opacity = '0';
+  setTimeout(() => document.getElementById('loading-msg').style.display = 'none', 300);
+}
+
+function resize() {
+  const vp = document.getElementById('viewport');
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+  camera.aspect = vp.clientWidth / vp.clientHeight;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(document.getElementById('viewport'));
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (currentMesh) currentMesh.rotation.y += 0.002;
+  renderer.render(scene, camera);
+}
+animate();
+
+// ════════════════════════════════════════════════════════
+// CHART
+// ════════════════════════════════════════════════════════
+const chartCtx = document.getElementById('conv-chart').getContext('2d');
+const convChart = new Chart(chartCtx, {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'T_out [K]', data: [], borderColor: '#0090ff', borderWidth: 1.5,
+      pointRadius: 0, tension: 0.4, yAxisID: 'y' },
+    { label: 'Ẇ [W]',   data: [], borderColor: '#ff6b35', borderWidth: 1.5,
+      pointRadius: 0, tension: 0.4, yAxisID: 'y2' },
+  ]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#4a6070', font: { family: 'Space Mono', size: 8 } }, grid: { color: '#1a2530' } },
+      y: { ticks: { color: '#0090ff', font: { family: 'Space Mono', size: 8 } }, grid: { color: '#1a2530' } },
+      y2: { position: 'right', ticks: { color: '#ff6b35', font: { family: 'Space Mono', size: 8 } }, grid: { drawOnChartArea: false } },
+    }
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════
+function getParams() {
+  const uc = parseFloat(document.getElementById('unit_cell').value);
+  const k  = (2 * Math.PI / (uc / 1000)).toFixed(1);
+  return {
+    enc_length:          parseFloat(document.getElementById('enc_length').value) / 1000,
+    enc_width:           parseFloat(document.getElementById('enc_width').value) / 1000,
+    enc_height:          parseFloat(document.getElementById('enc_height').value) / 1000,
+    enc_wall_thickness:  parseFloat(document.getElementById('enc_wall').value) / 1000,
+    tpms_type:           document.getElementById('tpms_type').value,
+    initial_wavenumber:  parseFloat(k),
+    iso_level:           parseFloat(document.getElementById('iso_level').value),
+    resolution:          parseInt(document.getElementById('resolution').value),
+    inflow_velocity:     parseFloat(document.getElementById('inflow_vel').value),
+    inflow_temperature:  parseFloat(document.getElementById('inflow_temp').value),
+    exterior_temperature: 293.15,
+    grpc_host: 'localhost', grpc_port: 50051,
+  };
+}
+
+function setMetric(id, val, unit='') {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = val + (unit ? ` <span class="metric-unit">${unit}</span>` : '');
+}
+
+let computeTimer = null;
+function scheduleCompute() {
+  clearTimeout(computeTimer);
+  computeTimer = setTimeout(compute, 300);
+}
+
+async function compute() {
+  try {
+    const p = getParams();
+    const r = await fetch('/api/compute', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)
+    });
+    const d = await r.json();
+    if (!d.ok) return;
+    setMetric('m-re',  d.flow.reynolds);
+    setMetric('m-pr',  d.flow.prandtl);
+    setMetric('m-nu',  d.sizing.Nu_turbulent);
+    setMetric('m-h',   d.sizing.h_W_m2K);
+    setMetric('m-sol', d.lattice.solidity);
+    setMetric('m-req', d.sizing.required_solidity);
+    setMetric('m-mass', d.lattice.mass_g, 'g');
+    setMetric('m-wall', d.lattice.est_wall_mm, 'mm');
+    const wallOk = d.manufacturability.wall_ok;
+    document.getElementById('mfg-wall').className = 'metric' + (wallOk ? '' : ' warn');
+  } catch(e) {}
+}
+
+async function update3D() {
+  const p = getParams();
+  document.getElementById('loading-msg').style.display = 'flex';
+  document.getElementById('loading-msg').style.opacity = '1';
+  document.getElementById('loading-msg').textContent = 'Generating gyroid mesh…';
+  document.getElementById('btn-update3d').disabled = true;
+  try {
+    const r = await fetch('/api/stl', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)
+    });
+    const metricsStr = r.headers.get('X-Metrics');
+    const metrics = metricsStr ? JSON.parse(metricsStr) : null;
+    const buf = await r.arrayBuffer();
+    loadSTLBuffer(buf, metrics);
+    if (metrics) {
+      setMetric('m-sol',  metrics.solidity);
+      setMetric('m-mass', metrics.mass_g, 'g');
+    }
+  } catch(e) {
+    document.getElementById('loading-msg').textContent = 'Error: ' + e.message;
+  }
+  document.getElementById('btn-update3d').disabled = false;
+}
+
+async function checkServer() {
+  try {
+    const r = await fetch('/api/simulate/status?host=localhost&port=50051');
+    const d = await r.json();
+    const dot = document.getElementById('server-dot');
+    const lbl = document.getElementById('server-label');
+    if (d.ok && !d.status.includes('unreachable') && !d.status.includes('error')) {
+      dot.className = 'dot ok';
+      lbl.textContent = 'GRPC · ' + d.status.slice(0, 20);
+    } else {
+      dot.className = 'dot err';
+      lbl.textContent = 'GRPC · offline';
+    }
+  } catch(e) {}
+}
+
+async function refreshHistory() {
+  try {
+    const r = await fetch('/api/simulate/history');
+    const d = await r.json();
+    if (!d.ok || !d.n_iterations) return;
+    convChart.data.labels = d.iterations.map(i => i.toString());
+    convChart.data.datasets[0].data = d.outlet_temperature;
+    convChart.data.datasets[1].data = d.mechanical_dissipation;
+    convChart.update();
+  } catch(e) {}
+}
+
+// ════════════════════════════════════════════════════════
+// WIRE UP
+// ════════════════════════════════════════════════════════
+
+// Slider labels
+const labelMap = {
+  enc_length:  ['lv', v => v],
+  enc_width:   ['wv', v => v],
+  enc_height:  ['hv', v => v],
+  enc_wall:    ['wtv', v => v],
+  unit_cell:   ['ucv', v => v + '.0'],
+  iso_level:   ['isov', v => parseFloat(v).toFixed(2)],
+  inflow_vel:  ['vv', v => parseFloat(v).toFixed(1)],
+  inflow_temp: ['tv', v => v],
+  resolution:  ['resv', v => v],
+};
+Object.entries(labelMap).forEach(([id, [labelId, fmt]]) => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    document.getElementById(labelId).textContent = fmt(el.value);
+    scheduleCompute();
+  });
+});
+document.getElementById('tpms_type').addEventListener('change', scheduleCompute);
+
+document.getElementById('btn-update3d').addEventListener('click', update3D);
+document.getElementById('btn-history').addEventListener('click', refreshHistory);
+
+document.getElementById('btn-baseline').addEventListener('click', async () => {
+  const step = document.getElementById('step-baseline');
+  step.classList.add('running');
+  try {
+    const r = await fetch('/api/simulate/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ design: getParams(), optimise: false })
+    });
+    const d = await r.json();
+    alert(d.ok ? 'Baseline started (config pushed): ' + d.message : 'Error: ' + d.error);
+  } catch(e) { alert('gRPC server not running'); }
+  step.classList.remove('running');
+});
+
+document.getElementById('btn-opt').addEventListener('click', async () => {
+  const step = document.getElementById('step-opt');
+  step.classList.add('running');
+  try {
+    const r = await fetch('/api/simulate/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ design: getParams(), optimise: true })
+    });
+    const d = await r.json();
+    if (d.ok) { alert('Optimisation started (config pushed)'); setInterval(refreshHistory, 10000); }
+    else alert('Error: ' + d.error);
+  } catch(e) { alert('gRPC server not running'); }
+});
+
+document.getElementById('btn-stop').addEventListener('click', async () => {
+  await fetch('/api/simulate/stop', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ design: getParams(), optimise: false })
+  });
+  document.getElementById('step-opt').classList.remove('running');
+  document.getElementById('step-baseline').classList.remove('running');
+});
+
+document.getElementById('btn-stl').addEventListener('click', async () => {
+  const p = getParams();
+  const r = await fetch('/api/stl', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)
+  });
+  const buf = await r.arrayBuffer();
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'heat_exchanger_gyroid.stl'; a.click();
+});
+
+document.getElementById('btn-report').addEventListener('click', async () => {
+  const p = getParams();
+  const r = await fetch('/api/report', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)
+  });
+  const blob = await r.blob();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'design_report.pdf'; a.click();
+});
+
+// Init
+checkServer();
+setInterval(checkServer, 10000);
+compute();
+</script>
+</body>
+</html>
