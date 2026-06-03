@@ -173,9 +173,10 @@ if ($Detach) {
 }
 $runArgs += $ImageTag
 
-# Activate conda env, then start the gRPC server from the cloned MTO repo.
-$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && cd /workspace/MTO && python 3Dheatsink_gyroid/grpc_server/server.py --port 50051"
+# Activate conda env, source OpenFOAM, build src_TF, then start the gRPC server.
+$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && source /opt/openfoam11/etc/bashrc && cd /workspace/MTO/3Dheatsink_gyroid/src_TF && wclean && wmake && cd /workspace/MTO && python 3Dheatsink_gyroid/grpc_server/server.py --port 50051"
 $runArgs += @("/bin/bash", "-c", $serverCmd)
+
 
 # ── run ───────────────────────────────────────────────────────────────────────
 Write-Step "Starting container '$ContainerName'"
