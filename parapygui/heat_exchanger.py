@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from parapy.core import Input, Attribute, Part
+from parapy.core import Input, Attribute, Part, action
 from parapy.geom import GeomBase
 
 from .encapsulation import Encapsulation
@@ -160,6 +160,16 @@ class HeatExchanger(GeomBase):
             mech_dissipation_lower=self.mech_dissipation_lower,
             mech_dissipation_upper=self.mech_dissipation_upper,
         )
+
+    @action(label="Edit environment")
+    def edit_environment(self):
+        import wx
+        from .GUIwxformbuilder import MyFrame1
+        app = wx.GetApp()
+        parent = app.GetTopWindow() 
+        frm = MyFrame1(parent)
+        frm.Show()
+
 
     @Part
     def fluid(self):
