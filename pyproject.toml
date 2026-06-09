@@ -1,61 +1,94 @@
 [project]
 name = "parapy_1.15"
 version = "0.1.0"
-description = "UV environment for parapy 1.15"
+description = "UV workspace — Bio-Inspired Heat Exchanger KBE App (TU Delft AE4204 Team 16)"
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
-# Python 3.13 is also possible but not compatible with matlabengine
+
+# ---------------------------------------------------------------------------
+# Shared / root-level dependencies (available to all workspace members)
+# ---------------------------------------------------------------------------
 dependencies = [
     "parapy>=1.15, <1.16",
-    #"parapy-lib-fluent", # some examples of additional ParaPy  modules
-    #"parapy-lib-fem",
-    #"parapy-lib-xfoil",
-    #"parapy-lib-abaqus",
-    #"parapy-lib-avl",
     "kbeutils",
     "wxpython",
     "matplotlib",
-    "pyqt6",
-    #"matlabengine==25.1",# version must match installed matlab version
     "cairocffi",
     "grpcio==1.81.0",
     "grpcio-tools==1.81.0",
     "protobuf==6.33.6",
     "setuptools==82.0.1",
+    # parapygui extras (web stack + image processing)
+    "fastapi",
+    "uvicorn[standard]",
+    "scikit-image",
+    "openpyxl",
+    "python-multipart",
+    # GUI toolkit alternative (kept alongside wxpython)
+    "pyqt6",
+    # Uncomment if MATLAB integration is needed (version must match installed MATLAB):
+    # "matlabengine==25.1",
 ]
 
+# ---------------------------------------------------------------------------
+# Optional extras (install with: uv sync --extra <name>)
+# ---------------------------------------------------------------------------
+[project.optional-dependencies]
+# Additional ParaPy solver / analysis modules — uncomment as needed:
+# xfoil  = ["parapy-lib-xfoil"]
+# fem    = ["parapy-lib-fem"]
+# fluent = ["parapy-lib-fluent"]
+# abaqus = ["parapy-lib-abaqus"]
+# avl    = ["parapy-lib-avl"]
 
+# Direct-metal additive manufacturing support:
+dfam = ["PythonSLM"]
+
+# ---------------------------------------------------------------------------
+# Entry points (defined here so they work from the workspace root;
+# they are also declared in parapygui/pyproject.toml for standalone use)
+# ---------------------------------------------------------------------------
+[project.scripts]
+kbe-web = "parapygui.webapp:app"
+kbe-gui = "parapygui.main:main"
+
+# ---------------------------------------------------------------------------
+# uv source overrides
+# ---------------------------------------------------------------------------
 [tool.uv]
 
 [tool.uv.sources]
-#wxpython = {path = "./wxPython-4.2.1-cp311-cp311-linux_x86_64.whl"}
-parapy = {index = "pypiparapy"}
-kbeutils = {path = "./kbeutils-1.0-py3-none-any.whl"}
-parapy-lib-xfoil = {index = "pypiparapy"}
-parapy-lib-abaqus = {index = "pypiparapy"}
-parapy-lib-avl = {index = "pypiparapy"}
+parapy              = { index = "pypiparapy" }
+wxpython            = { index = "pypiparapy" }
+kbeutils            = { path = "./kbeutils-1.0-py3-none-any.whl" }
+parapy-lib-xfoil    = { index = "pypiparapy" }
+parapy-lib-abaqus   = { index = "pypiparapy" }
+parapy-lib-avl      = { index = "pypiparapy" }
+
+# ---------------------------------------------------------------------------
+# Index configuration
+# ---------------------------------------------------------------------------
+[[tool.uv.index]]
+name       = "pypiparapy"
+url        = "https://pypi.parapy.nl/simple/"
+verify_ssl = true
+# Authentication — choose one method:
+#   1. Environment variables:
+#        UV_INDEX_pypiparapy_USERNAME=<username>
+#        UV_INDEX_pypiparapy_PASSWORD=<password>
+#   2. CLI login (run once):
+#        uv auth login pypi.parapy.nl --username <username> --password <pw>
 
 [[tool.uv.index]]
-name = "pypiparapy"
+name       = "pypi"
+url        = "https://pypi.org/simple"
 verify_ssl = true
-url = "https://pypi.parapy.nl/simple/"
-# to access, there are two options:
-# 1:
-# set the following environment variables first:
-#UV_INDEX_pypiparapy_USERNAME=<username>
-#UV_INDEX_pypiparapy_PASSWORD=<password>
-#
-#2:
-# run this command on the commandline before installing (requires uv to b installed):
-# `uv auth login pypi.parapy.nl --username <username> --password <pw>`
 
-
-[[tool.uv.index]]
-name = "pypi"
-verify_ssl = true
-url = "https://pypi.org/simple"
-
+# ---------------------------------------------------------------------------
+# Workspace members
+# ---------------------------------------------------------------------------
 [tool.uv.workspace]
 members = [
     "parapygui",
+    "parapy.gui",
 ]

@@ -23,7 +23,7 @@ uv auth login pypi.parapy.nl
 ```bash
 uv init parapygui
 uv sync
-which python
+where python
 ```
 
 - use ctrl+shift+P in vscode and click 'select interpreter'. Then choose for the option that corresponds to the just created uv installation
