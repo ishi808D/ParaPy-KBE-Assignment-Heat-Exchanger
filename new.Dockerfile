@@ -109,8 +109,9 @@ RUN git clone https://github.com/HuiLucas/MTO.git
 
 RUN git clone --recursive https://github.com/wjakob/instant-meshes \
     && cd instant-meshes \
+    && export CXXFLAGS="-Wno-changes-meaning" \
     && cmake . \
-    && make -j 4
+    && make -j$(nproc)
 
 RUN conda init bash \
     && echo "conda activate OFTPMSoptimiser" >> /home/vscode/.bashrc
@@ -124,7 +125,7 @@ RUN sh -c "wget -O - https://dl.openfoam.org/gpg.key > /etc/apt/trusted.gpg.d/op
 
 RUN apt update && apt -y install openfoam11
 
-RUN apt-get install libcgal-dev
+RUN apt-get -y install libcgal-dev
 
 SHELL ["/bin/bash", "-c"]
 RUN echo "source /opt/openfoam11/etc/bashrc" >> /etc/bash.bashrc

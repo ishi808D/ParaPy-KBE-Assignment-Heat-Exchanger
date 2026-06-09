@@ -18,7 +18,8 @@ Commands
                                      patch-config optimization.mode=heat
                                      patch-config optimization.no_overhang=false
                                      patch-config run.iters=10 optimization.mode=pressure
-  start [-- extra args …]          Start a run (pass extra wrapper args after --)
+  start [--restart] [-- extra args …]  
+                  Start a run (pass extra wrapper args after --). --restart makes it restartable from the latest checkpoint.
   stop                             Stop the running process
   status                           Show run state
   stream                           Tail the optimizer output (Ctrl-C to quit)
@@ -27,7 +28,13 @@ Commands
   list-files [subpath]             List files in app/ (or a subdirectory)
   download <path> [out_dir]        Download a file from app/ to out_dir (default: .)
   download-app [out_dir]           Download the entire app/ folder as a .tar.gz
-  stl-export [-- extra args …]     Run gyroid_to_stl.py on the server (pass extra args after --)
+  stl-export  [--out] [--res] [--target-faces] [--fluid-stl] [-- extra args …]     
+                                    Run gyroid_to_stl.py on the server (pass extra args after --)
+                                    --out allows you to specify file name.
+                                    --res sets the STL resolution (default: 0.4 mm)
+                                    --target-faces sets the target number of faces (default: 5 million)
+                                    --fluid-stl exports an additional STL of the fluid domain. This can be useful to analyse if the 
+                                    fluid domain is continuous or blocked by a wall at some point.
   stl-stream                        Tail the STL export output (Ctrl-C to quit)
   stl-status                        Show STL export process state
   download-stl all|lattice|encap|surface [out_dir]
@@ -35,23 +42,44 @@ Commands
 
 
   --- Gyroid → quad mesh ---
-  quad-mesh [extra_args ...]       Run gyroid_to_quad_mesh_qf.py on the server
+  quad-mesh [--out] [--angular] [--radius] [--distance] [--target-faces] [--no-boundary] [--crease] [--smooth] [--taubin-iter] [--weld-tol] [extra_args ...]       
+                                    Run gyroid_to_quad_mesh_qf.py on the server
+                                    --out allows you to specify file name (default: gyroid_implicit_qf.obj)
+                                    --angular sets the CGAL angular criterion (default: 30°)
+                                    --radius sets the CGAL radius criterion (default: 1.0 mm)
+                                    --distance sets the CGAL distance criterion (default: 3.5 mm)
+                                    --target-faces sets the target number of faces (default: 50000) for the triangular mesh, the quad mesh will have a different
+                                    number of faces. This parameter (together with --radius) determines the resolution/size of the quad mesh.
+                                    --no-boundary disables boundary surfaces
+                                    --crease sets the crease angle (default: 25°)
+                                    --smooth sets the smoothing iterations (default: 2)
+                                    --taubin-iter sets the Taubin smoothing iterations (default: 10)
+                                    --weld-tol sets the welding tolerance (default: 0.5 mm)
                                    Default output: gyroid_implicit_qf_plus/minus.obj
   quad-mesh-stop                   Stop the running quad-mesh process
   quad-mesh-status                 Show quad-mesh process state
   quad-mesh-stream                 Tail live quad-mesh output
 
   --- Quad mesh → NURBS STEP ---
-  nurbs [plus|minus] [extra_args ...]  Run quad_to_nurbs.py for a gyroid sheet
+  nurbs [plus|minus] [--subd] [--deg-min] [--deg-max] [--tol] [--sew-tol] [extra_args ...]  
+                                        Run quad_to_nurbs.py for a gyroid sheet
                                        Default sheet: plus
                                        Default input : gyroid_implicit_qf_<sheet>.obj
                                        Default output: gyroid_implicit_qf_<sheet>.step
+                                       --subd sets number of subdivisions for each quad (default: 1, i.e. no subdision)
+                                        --deg-min sets the minimum degree of the NURBS surfaces (default: 3)
+                                        --deg-max sets the maximum degree of the NURBS surfaces (default: 8)
+                                        --tol sets the B-spline tolerance (default: 0.001 mm)
+                                        --sew-tol sets the sewing tolerance for stitching NURBS surfaces together (default: 0.05 mm)
+
   nurbs-stop                       Stop the running quad-to-NURBS process
   nurbs-status                     Show quad-to-NURBS process state
   nurbs-stream                     Tail live quad-to-NURBS output
   download-nurbs [plus|minus] [obj|step] [out_dir]
                                    Download the OBJ (quad mesh) or STEP (NURBS) file
                                    Defaults: sheet=plus  format=step  out_dir=.
+
+For the "extra args", go to the server source code in https://github.com/HuiLucas/MTO
 
 """
 
@@ -133,6 +161,8 @@ def cmd_status(stub, _args):
     print(f"PID        : {resp.pid or '—'}")
     print(f"Return code: {resp.return_code}")
     print(f"Message    : {resp.message}")
+    print("To list commands use: python client.py help")
+
 
 
 def cmd_stream(stub, _args):
