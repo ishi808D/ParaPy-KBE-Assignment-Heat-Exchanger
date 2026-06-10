@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG BUILD_DATE=2026-06-01
+ARG BUILD_DATE=2026-06-10
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG WORKSPACE=/workspace
@@ -107,6 +107,12 @@ WORKDIR ${WORKSPACE}
 
 RUN git clone https://github.com/HuiLucas/MTO.git
 
+RUN git clone --recursive https://github.com/wjakob/instant-meshes \
+    && cd instant-meshes \
+    && export CXXFLAGS="-Wno-changes-meaning" \
+    && cmake . \
+    && make -j$(nproc)
+
 RUN conda init bash \
     && echo "conda activate OFTPMSoptimiser" >> /home/vscode/.bashrc
 
@@ -118,6 +124,8 @@ RUN sh -c "wget -O - https://dl.openfoam.org/gpg.key > /etc/apt/trusted.gpg.d/op
     && add-apt-repository http://dl.openfoam.org/ubuntu
 
 RUN apt update && apt -y install openfoam11
+
+RUN apt-get -y install libcgal-dev
 
 SHELL ["/bin/bash", "-c"]
 RUN echo "source /opt/openfoam11/etc/bashrc" >> /etc/bash.bashrc

@@ -48,6 +48,9 @@ dependencies:
   - chex=0.1.88
   - pyamg=5.2.1
   - pypardiso
+  - scikit-image
+  - pythonocc-core
+
 
   # ---- C / system deps (let conda resolve exact builds) ----
   - cffi

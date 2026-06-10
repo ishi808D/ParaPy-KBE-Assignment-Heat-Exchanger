@@ -174,7 +174,7 @@ if ($Detach) {
 $runArgs += $ImageTag
 
 # Activate conda env, source OpenFOAM, build src_TF, then start the gRPC server.
-$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && source /opt/openfoam11/etc/bashrc && cd /workspace/MTO/3Dheatsink_gyroid/src_TF && wclean && wmake && cd /workspace/MTO && python 3Dheatsink_gyroid/grpc_server/server.py --port 50051"
+$serverCmd = "source /opt/conda/etc/profile.d/conda.sh && conda activate OFTPMSoptimiser && source /opt/openfoam11/etc/bashrc && cd /workspace/MTO/3Dheatsink_gyroid/src_TF && wclean && wmake && cd /workspace/MTO && git pull && python 3Dheatsink_gyroid/grpc_server/server.py --port 50051"
 $runArgs += @("/bin/bash", "-c", $serverCmd)
 
 
