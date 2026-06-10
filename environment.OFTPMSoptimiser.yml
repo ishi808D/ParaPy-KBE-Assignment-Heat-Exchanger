@@ -50,6 +50,15 @@ dependencies:
   - pypardiso
   - scikit-image
   - pythonocc-core
+  - Rtree
+  - trimesh
+  - vispy
+  - pyqt5
+  - triangle
+  - pyclipr
+  - manifold3d
+  - mapbox-earcut
+
 
 
   # ---- C / system deps (let conda resolve exact builds) ----
