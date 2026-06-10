@@ -41,3 +41,8 @@ Attach VS Code to the running container to inspect the environment and runtime b
 
 ## TODO
 Create a ParaPy GUI using the parapy tools, also use wxformbuilder (see https://parapy.nl/docs/parapy/latest/tutorials/gui_widgets.html?highlight=wxformbuilder) and (https://ai.parapy.nl). Let the GUI follow the steps described in the KBE Proposal Document. The GUI should interact with the optimiser using the python commands described by `python client.py help`. Also use https://parapy.nl/docs/parapy/latest/examples/examples_tree/exchange/stl_reader.html#exchange-stl-reader-py to show stl inside the ParaPy GUI.
+
+
+## Run Parapy
+uv run python -m parapygui.main
+=======

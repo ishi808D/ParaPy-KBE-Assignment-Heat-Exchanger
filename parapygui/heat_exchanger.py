@@ -31,6 +31,7 @@ Workflow (fire these from the GUI property grid)
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from parapy.core import Input, Attribute, Part, action
@@ -122,6 +123,25 @@ class HeatExchanger(GeomBase):
     grpc_host: str = Input("localhost")
     grpc_port: int = Input(50051)
 
+    # ── server config: optimization  (maps to optimization.* in YAML) ─
+
+    meantT_max:      float = Input(340.0,     label="Mean T constraint (K)")
+    dissPower_max:   float = Input(2800000.0, label="Dissipation constraint (W)")
+    opt_wall_cells:  int   = Input(6,         label="Wall thickness (cells)")
+    opt_unit_cells:  int   = Input(75,        label="Unit cell size (cells)")
+    am_theta:        float = Input(45.0,      label="Overhang angle (deg)")
+    max_iterations:  int   = Input(100,       label="Max iterations")
+    kbound:          float = Input(0.08,      label="kbound")
+    no_overhang:     bool  = Input(False,     label="Enable overhang constraint")
+    opt_mode:        str   = Input("pressure", label="Opt mode (pressure/heat)")
+
+    # ── results (written back by the workflow wizard) ─────────────────
+
+    baseline_dissipation: float = Input(0.0, label="Baseline Dissipation (W)")
+    baseline_mean_temp:   float = Input(0.0, label="Baseline Mean Temp (K)")
+    opt_dissipation:      float = Input(0.0, label="Opt Dissipation (W)")
+    opt_mean_temp:        float = Input(0.0, label="Opt Mean Temp (K)")
+
     # ═════════════════════════════════════════════════════════════════
     # Parts  (product tree)
     # ═════════════════════════════════════════════════════════════════
@@ -161,14 +181,15 @@ class HeatExchanger(GeomBase):
             mech_dissipation_upper=self.mech_dissipation_upper,
         )
 
-    @action(label="Edit environment")
+    @action(label="Open Workflow Wizard")
     def edit_environment(self):
         import wx
-        from .GUIwxformbuilder import MyFrame1
+        from .workflow import WorkflowWizard
         app = wx.GetApp()
-        parent = app.GetTopWindow() 
-        frm = MyFrame1(parent)
+        parent = app.GetTopWindow()
+        frm = WorkflowWizard(parent, parapy_obj=self)
         frm.Show()
+        return "Workflow wizard opened."
 
 
     @Part
@@ -358,18 +379,46 @@ class HeatExchanger(GeomBase):
     # ═════════════════════════════════════════════════════════════════
 
     def _push_config(self) -> None:
-        """Merge all sub-part configs and push to the gRPC server."""
+        """Merge all inputs into a config patch and push to gRPC server.
+
+        Keys match the actual gyroid_case_config.yaml structure.
+        NOTE: geometry.size_mm, cells, and window coordinates are NOT
+        pushed — the blockMeshDict is fixed at 100mm. Only flow, thermal,
+        and optimization params are sent.
+        """
         cfg: dict = {}
-        cfg.update(self.environment.grpc_patch_dict)
-        cfg.update(self.lattice.grpc_patch_dict)
-        cfg.update(self.objectives.grpc_patch_dict)
-        cfg.update(self.manufacturing.grpc_patch_dict)
-        cfg.update({
-            "geometry.length":         self.enc_length,
-            "geometry.width":          self.enc_width,
-            "geometry.height":         self.enc_height,
-            "geometry.wall_thickness": self.enc_wall_thickness,
-        })
+
+        # inlet
+        cfg["inlet.velocity_magnitude"] = self.inflow_velocity
+        cfg["inlet.temperature"] = self.inflow_temperature
+
+        # outlet
+        cfg["outlet.pressure"] = self.outlet_pressure
+
+        # material / thermal
+        cfg["material.Texterior"] = self.exterior_temperature
+        cfg["material.nu"] = self.fluid.kinematic_viscosity
+        cfg["thermal.initial_temperature"] = self.exterior_temperature
+
+        # optimization
+        cfg["optimization.mode"] = self.opt_mode
+        cfg["optimization.meantT_max"] = self.meantT_max
+        cfg["optimization.dissPower_max"] = self.dissPower_max
+        cfg["optimization.wall"] = self.opt_wall_cells
+        cfg["optimization.unit"] = self.opt_unit_cells
+        cfg["optimization.am_theta"] = self.am_theta
+        cfg["optimization.no_overhang"] = self.no_overhang
+        cfg["optimization.kbound"] = self.kbound
+
+        # run
+        cfg["run.iters"] = self.max_iterations
+
+        # also include sub-part patches if they provide them
+        for part_name in ("environment", "lattice", "objectives", "manufacturing"):
+            part = getattr(self, part_name, None)
+            if part and hasattr(part, "grpc_patch_dict"):
+                cfg.update(part.grpc_patch_dict)
+
         self.sim.patch_config(cfg)
 
     def start_baseline(self) -> str:
@@ -443,6 +492,8 @@ class HeatExchanger(GeomBase):
         """Generate the design-summary PDF (and convergence plots)."""
         self.report.generate_convergence_png()
         return self.report.generate()
+    
+    
 
     # ── class-method loaders ─────────────────────────────────────────
 
@@ -459,3 +510,47 @@ class HeatExchanger(GeomBase):
         data = {k: v for k, v in raw.items()
                 if not k.startswith("_") and k in known}
         return cls(**data)
+
+
+    # ═════════════════════════════════════════════════════════════════
+    # Semi-empirical sizing attributes  (used by workflow wizard)
+    # Uses EXISTING inputs: inflow_velocity, enc_width, enc_height,
+    # enc_length, and self.fluid / self.encapsulation Parts.
+    # ═════════════════════════════════════════════════════════════════
+
+    @Attribute
+    def hydraulic_diameter(self):
+        """Hydraulic diameter of the interior cavity (m)."""
+        return self.encapsulation.hydraulic_diameter
+
+    @Attribute
+    def solidity(self):
+        """Required solidity from semi-empirical correlation.
+        TODO: Replace with actual gyroid fits from DOI 10.1016/j.enconman.2023.116955
+        """
+        Re = self.reynolds_number
+        Pr = self.fluid.prandtl_number
+        base = 0.023 * Re**0.8 * Pr**0.4
+        target_Nu = 0.5 * base * (1 + 2.5 * 0.3)
+        if base == 0:
+            return 0.3
+        return max(0.05, min(0.95, (target_Nu / base - 1.0) / 2.5))
+
+    @Attribute
+    def nusselt_number(self):
+        """Nusselt number from semi-empirical correlation."""
+        return 0.023 * self.reynolds_number**0.8 * self.fluid.prandtl_number**0.4 * (1 + 2.5 * self.solidity)
+
+    @Attribute
+    def friction_factor(self):
+        """Friction factor from semi-empirical correlation."""
+        return (64.0 / max(self.reynolds_number, 1)) * (1 + 10 * self.solidity)
+
+    @Attribute
+    def pressure_drop(self):
+        """Estimated pressure drop (Pa)."""
+        L = self.enc_length
+        D_h = self.hydraulic_diameter
+        rho = self.fluid.density
+        U = self.inflow_velocity
+        return self.friction_factor * (L / D_h) * 0.5 * rho * U**2 if D_h > 0 else 0.0
