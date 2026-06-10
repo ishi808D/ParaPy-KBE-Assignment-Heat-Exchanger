@@ -41,3 +41,7 @@ Attach VS Code to the running container to inspect the environment and runtime b
 
 ## TODO
 Create a ParaPy GUI using the parapy tools, also use wxformbuilder (see https://parapy.nl/docs/parapy/latest/tutorials/gui_widgets.html?highlight=wxformbuilder) and (ai.parapy.nl). Let the GUI follow the steps described in the KBE Proposal Document
+
+
+## Run Parapy
+uv run python -m parapygui.main
