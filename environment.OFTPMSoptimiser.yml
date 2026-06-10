@@ -58,6 +58,7 @@ dependencies:
   - pyclipr
   - manifold3d
   - mapbox-earcut
+  - PythonSLM
 
 
 
