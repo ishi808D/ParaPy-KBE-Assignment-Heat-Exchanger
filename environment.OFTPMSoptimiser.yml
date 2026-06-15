@@ -48,6 +48,8 @@ dependencies:
   - chex=0.1.88
   - pyamg=5.2.1
   - pypardiso
+  - pythonocc-core
+
   
 
 
@@ -173,7 +175,6 @@ dependencies:
       - PythonSLM
       - pyclipr
       - scikit-image
-      - pythonocc-core
       - Rtree
       - trimesh
       - vispy
