@@ -55,7 +55,6 @@ dependencies:
   - vispy
   - pyqt5
   - triangle
-  - pyclipr
 
 
 
@@ -178,3 +177,4 @@ dependencies:
       - manifold3d
       - mapbox-earcut
       - PythonSLM
+      - pyclipr
