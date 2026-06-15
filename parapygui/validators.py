@@ -23,13 +23,13 @@ def check_interior_positive(length, width, height, wt) -> None:
             )
 
 
-def check_tube_fits(width, height, wt, tube_d, tube_wt) -> None:
+def check_tube_fits(width, height, wt, bore_w, bore_h, tube_wt) -> None:
     """Port tube must fit within the interior face."""
     face_min = min(width - 2*wt, height - 2*wt)
-    tube_outer = tube_d + 2 * tube_wt
+    tube_outer = max(bore_w, bore_h) + 2 * tube_wt
     if tube_outer >= face_min:
         raise ValueError(
-            f"Tube outer ∅ ({tube_outer*1e3:.1f} mm) exceeds "
+            f"Tube outer size ({tube_outer*1e3:.1f} mm) exceeds "
             f"smallest interior face dimension ({face_min*1e3:.1f} mm)."
         )
 
@@ -86,7 +86,7 @@ def validate_heat_exchanger(he) -> list[str]:
          (enc.length, enc.width, enc.height, enc.wall_thickness)),
         (check_tube_fits,
          (enc.width, enc.height, enc.wall_thickness,
-          enc.inlet_diameter, enc.tube_wall)),
+                    enc.inlet_bore_width, enc.inlet_bore_height, enc.tube_wall)),
         (check_temperatures,
          (env.inflow_temperature, env.exterior_temperature)),
         (check_dissipation_bounds,

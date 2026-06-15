@@ -95,12 +95,21 @@ class WorkflowWizard(WorkflowWizardFrame):
         self._page = 0
         self._opt_iters, self._opt_objs, self._opt_cstrs = [], [], []
         self._stop = threading.Event()
+        self._last_obj_path = None
+        self._last_stl_paths = []
+        self._sim_running = False       # True while baseline or optimization is active
+        self._completed = set()
+
+        # Create default input/output folders
+        from pathlib import Path
+        Path("inputs").mkdir(exist_ok=True)
+        Path("outputs").mkdir(exist_ok=True)          # tracks completed workflow steps: {"baseline", "optimize"}
 
         self._grpc = GrpcConnection(
             host=getattr(parapy_obj, "grpc_host", "localhost"),
             port=getattr(parapy_obj, "grpc_port", 50051))
 
-        for wv in [self.m_webviewSE, self.m_webviewBaseline,
+        for wv in [self.m_webviewBaseline,
                     self.m_webviewConvergence, self.m_webviewResults]:
             wv.SetPage(_empty_html(), "")
 
@@ -150,6 +159,12 @@ class WorkflowWizard(WorkflowWizardFrame):
             val = getattr(obj, attr, fallback)
             spinner.SetValue(float(val) * scale)
 
+        # cores is a SpinCtrl (int), not SpinCtrlDouble
+        try:
+            self.m_spinCores.SetValue(int(getattr(obj, "parallel_cores", 10)))
+        except Exception:
+            self.m_spinCores.SetValue(10)
+
         # kinematic viscosity and density come from the fluid Part
         try:
             self.m_spinNu.SetValue(obj.fluid.kinematic_viscosity)
@@ -186,6 +201,9 @@ class WorkflowWizard(WorkflowWizardFrame):
         for spinner, attr, scale in pairs:
             try: setattr(obj, attr, spinner.GetValue() / scale)
             except Exception: pass
+        # cores
+        try: setattr(obj, "parallel_cores", self.m_spinCores.GetValue())
+        except Exception: pass
 
     def _try_load_from_server(self):
         """Try to pull the current config from the running container
@@ -239,25 +257,71 @@ class WorkflowWizard(WorkflowWizardFrame):
     def _build_config_patch(self):
         """Map GUI spinners → server config dot-notation keys.
 
-        NOTE: geometry.size_mm, geometry.cells, and inlet/outlet window
-        coordinates are NOT pushed — the server's blockMeshDict template
-        is fixed at 100mm and those values must stay consistent with the
-        mesh. Only flow/thermal/optimization params are pushed.
-        Clarify with Huirne before enabling geometry overrides.
+        geometry.size_mm regenerates the blockMeshDict — inlet/outlet
+        window coordinates MUST be within the domain bounds.
+        Validation is performed before building the patch.
         """
+        # ── Validate window coordinates fit inside domain ──
+        size_x = self.m_spinSizeX.GetValue()
+        size_y = self.m_spinSizeY.GetValue()
+        size_z = self.m_spinSizeZ.GetValue()
+        # Flow axis is z by default; transverse axes are x and y
+        # Window coords are 2D on the transverse plane
+        transverse = [size_x, size_y]  # for flow_axis=z
+
+        for label, ox, oy, sx, sy in [
+            ("Inlet",
+             self.m_spinInWinOX.GetValue(), self.m_spinInWinOY.GetValue(),
+             self.m_spinInWinSX.GetValue(), self.m_spinInWinSY.GetValue()),
+            ("Outlet",
+             self.m_spinOutWinOX.GetValue(), self.m_spinOutWinOY.GetValue(),
+             self.m_spinOutWinSX.GetValue(), self.m_spinOutWinSY.GetValue()),
+        ]:
+            if ox + sx > transverse[0] + 0.01:
+                raise ValueError(
+                    f"{label} window X: origin({ox}) + size({sx}) = {ox+sx} "
+                    f"exceeds domain width {transverse[0]}mm")
+            if oy + sy > transverse[1] + 0.01:
+                raise ValueError(
+                    f"{label} window Y: origin({oy}) + size({sy}) = {oy+sy} "
+                    f"exceeds domain height {transverse[1]}mm")
+
         p = {}
 
-        # ── Safe to push: flow & thermal ──
+        # ── Geometry (regenerates blockMeshDict) ──
+        p["geometry.size_mm"] = [size_x, size_y, size_z]
+        p["geometry.encap_wall_mm"] = self.m_spinEncapWall.GetValue()
+
+        # ── Inlet (windows must fit inside geometry.size_mm) ──
         p["inlet.velocity_magnitude"] = self.m_spinInletVel.GetValue()
         p["inlet.temperature"] = self.m_spinInletTemp.GetValue()
-        p["outlet.pressure"] = self.m_spinOutletP.GetValue()
+        p["inlet.window_origin_mm"] = [
+            self.m_spinInWinOX.GetValue(),
+            self.m_spinInWinOY.GetValue(),
+        ]
+        p["inlet.window_size_mm"] = [
+            self.m_spinInWinSX.GetValue(),
+            self.m_spinInWinSY.GetValue(),
+        ]
 
+        # ── Outlet (windows must fit inside geometry.size_mm) ──
+        p["outlet.pressure"] = self.m_spinOutletP.GetValue()
+        p["outlet.window_origin_mm"] = [
+            self.m_spinOutWinOX.GetValue(),
+            self.m_spinOutWinOY.GetValue(),
+        ]
+        p["outlet.window_size_mm"] = [
+            self.m_spinOutWinSX.GetValue(),
+            self.m_spinOutWinSY.GetValue(),
+        ]
+
+        # ── Material / thermal ──
         p["material.Texterior"] = self.m_spinTexterior.GetValue()
         p["material.nu"] = self.m_spinNu.GetValue()
         p["material.rho_fluid"] = self.m_spinRhoFluid.GetValue()
         p["thermal.initial_temperature"] = self.m_spinTinitial.GetValue()
 
-        # ── Safe to push: optimization ──
+        # ── Optimization ──
         mode = "pressure" if self.m_radioMode.GetSelection() == 0 else "heat"
         p["optimization.mode"] = mode
         p["optimization.meantT_max"] = self.m_spinMeanTMax.GetValue()
@@ -268,19 +332,14 @@ class WorkflowWizard(WorkflowWizardFrame):
         p["optimization.no_overhang"] = self.m_chkNoOverhang.GetValue()
         p["optimization.kbound"] = self.m_spinKbound.GetValue()
 
-        # ── Safe to push: run control ──
+        # ── Run control ──
         p["run.iters"] = int(self.m_spinMaxIter.GetValue())
-
-        # ── NOT pushed (mesh-dependent, leave server defaults): ──
-        # geometry.size_mm, geometry.cells, geometry.flow_axis,
-        # geometry.encap_wall_mm, inlet.window_origin_mm,
-        # inlet.window_size_mm, outlet.window_origin_mm,
-        # outlet.window_size_mm
+        p["run.parallel"] = self.m_spinCores.GetValue()
 
         return p
 
     # =================================================================
-    # Navigation
+    # Navigation (dependency-aware)
     # =================================================================
 
     def _go_to(self, idx):
@@ -291,12 +350,33 @@ class WorkflowWizard(WorkflowWizardFrame):
         self._update_nav()
 
     def _update_nav(self):
-        self.m_btnBack.Enable(self._page > 0)
+        # Back: disabled on page 0 or while a simulation is running
+        self.m_btnBack.Enable(self._page > 0 and not self._sim_running)
+
+        # Next: disabled while sim running; on certain pages, require completion
+        can_next = not self._sim_running
+        if self._page == 2 and "baseline" not in self._completed:
+            can_next = False  # must run baseline before advancing
+        if self._page == 4 and "optimize" not in self._completed:
+            can_next = False  # must run optimization before advancing
+
+        self.m_btnNext.Enable(can_next)
         self.m_btnNext.SetLabel("Finish" if self._page == self.NUM_PAGES - 1 else "Next ▶")
 
-    def onBack(self, event): self._go_to(self._page - 1)
+        # Export buttons on page 5: only enabled after optimization
+        if hasattr(self, "m_btnExportSTL"):
+            exports_ok = "optimize" in self._completed
+            self.m_btnExportSTL.Enable(exports_ok)
+            self.m_btnQuadMesh.Enable(exports_ok)
+
+    def onBack(self, event):
+        if self._sim_running:
+            return  # safety: can't go back during sim
+        self._go_to(self._page - 1)
 
     def onNext(self, event):
+        if self._sim_running:
+            return
         if self._page == self.NUM_PAGES - 1:
             self.Close(); return
         if self._page == 0:
@@ -306,6 +386,11 @@ class WorkflowWizard(WorkflowWizardFrame):
             self._write_gui_to_parapy()
         self._go_to(self._page + 1)
 
+    def _set_sim_running(self, running):
+        """Update simulation state and refresh navigation."""
+        self._sim_running = running
+        self._update_nav()
+
     # =================================================================
     # Page 0: Apply geometry
     # =================================================================
@@ -313,6 +398,90 @@ class WorkflowWizard(WorkflowWizardFrame):
     def onApplyGeom(self, event):
         self._write_gui_to_parapy()
         self.m_statusLabel.SetLabel("Applied to ParaPy model.")
+
+    def onLoadJSON(self, event):
+        """Load configuration from a JSON file."""
+        import json
+        from pathlib import Path
+        inputs_dir = Path("inputs")
+        inputs_dir.mkdir(exist_ok=True)
+        dlg = wx.FileDialog(self, "Load Configuration", str(inputs_dir),
+                            wildcard="JSON files (*.json)|*.json",
+                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        if dlg.ShowModal() == wx.ID_OK:
+            try:
+                with open(dlg.GetPath()) as f:
+                    cfg = json.load(f)
+                # Map JSON keys → spinner values
+                spinner_map = {
+                    "domain_size_x": (self.m_spinSizeX, 1),
+                    "domain_size_y": (self.m_spinSizeY, 1),
+                    "domain_size_z": (self.m_spinSizeZ, 1),
+                    "inlet_velocity": (self.m_spinInletVel, 1),
+                    "inlet_temperature": (self.m_spinInletTemp, 1),
+                    "outlet_pressure": (self.m_spinOutletP, 1),
+                    "exterior_temperature": (self.m_spinTexterior, 1),
+                    "initial_temperature": (self.m_spinTinitial, 1),
+                    "encap_wall_mm": (self.m_spinEncapWall, 1),
+                    "meantT_max": (self.m_spinMeanTMax, 1),
+                    "dissPower_max": (self.m_spinDissPMax, 1),
+                    "opt_wall_cells": (self.m_spinWallCells, 1),
+                    "opt_unit_cells": (self.m_spinUnitCells, 1),
+                    "am_theta": (self.m_spinAmTheta, 1),
+                    "max_iterations": (self.m_spinMaxIter, 1),
+                    "kbound": (self.m_spinKbound, 1),
+                }
+                for key, (spinner, _) in spinner_map.items():
+                    if key in cfg:
+                        spinner.SetValue(float(cfg[key]))
+                if "parallel_cores" in cfg:
+                    self.m_spinCores.SetValue(int(cfg["parallel_cores"]))
+                if "opt_mode" in cfg:
+                    self.m_radioMode.SetSelection(
+                        0 if cfg["opt_mode"] == "pressure" else 1)
+                self.m_statusLabel.SetLabel(f"Loaded: {dlg.GetPath()}")
+            except Exception as e:
+                wx.MessageBox(f"Failed to load:\n{e}", "Error", wx.OK|wx.ICON_ERROR)
+        dlg.Destroy()
+
+    def onSaveJSON(self, event):
+        """Save current configuration to a JSON file."""
+        import json
+        from pathlib import Path
+        outputs_dir = Path("outputs")
+        outputs_dir.mkdir(exist_ok=True)
+        dlg = wx.FileDialog(self, "Save Configuration", str(outputs_dir),
+                            defaultFile="config.json",
+                            wildcard="JSON files (*.json)|*.json",
+                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+        if dlg.ShowModal() == wx.ID_OK:
+            cfg = {
+                "domain_size_x": self.m_spinSizeX.GetValue(),
+                "domain_size_y": self.m_spinSizeY.GetValue(),
+                "domain_size_z": self.m_spinSizeZ.GetValue(),
+                "inlet_velocity": self.m_spinInletVel.GetValue(),
+                "inlet_temperature": self.m_spinInletTemp.GetValue(),
+                "outlet_pressure": self.m_spinOutletP.GetValue(),
+                "exterior_temperature": self.m_spinTexterior.GetValue(),
+                "initial_temperature": self.m_spinTinitial.GetValue(),
+                "encap_wall_mm": self.m_spinEncapWall.GetValue(),
+                "meantT_max": self.m_spinMeanTMax.GetValue(),
+                "dissPower_max": self.m_spinDissPMax.GetValue(),
+                "opt_wall_cells": int(self.m_spinWallCells.GetValue()),
+                "opt_unit_cells": int(self.m_spinUnitCells.GetValue()),
+                "am_theta": self.m_spinAmTheta.GetValue(),
+                "max_iterations": int(self.m_spinMaxIter.GetValue()),
+                "parallel_cores": self.m_spinCores.GetValue(),
+                "kbound": self.m_spinKbound.GetValue(),
+                "opt_mode": "pressure" if self.m_radioMode.GetSelection() == 0 else "heat",
+            }
+            try:
+                with open(dlg.GetPath(), "w") as f:
+                    json.dump(cfg, f, indent=2)
+                self.m_statusLabel.SetLabel(f"Saved: {dlg.GetPath()}")
+            except Exception as e:
+                wx.MessageBox(f"Failed to save:\n{e}", "Error", wx.OK|wx.ICON_ERROR)
+        dlg.Destroy()
 
     # =================================================================
     # Page 1: Semi-empirical sizing (reads ParaPy @Attributes)
@@ -339,9 +508,10 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onRunBaseline(self, event):
         self.m_btnRunBaseline.Enable(False)
-        self.m_statusLabel.SetLabel("Pushing config & starting baseline…")
+        self.m_statusLabel.SetLabel("Starting baseline simulation…")
         self.m_gaugeBaseline.SetValue(0)
         self._stop.clear()
+        self._set_sim_running(True)
         threading.Thread(target=self._run_worker, args=("baseline",), daemon=True).start()
 
     # =================================================================
@@ -350,9 +520,10 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onStartOpt(self, event):
         self.m_btnStartOpt.Enable(False)
-        self.m_statusLabel.SetLabel("Pushing config & starting optimization…")
+        self.m_statusLabel.SetLabel("Starting optimisation…")
         self._opt_iters.clear(); self._opt_objs.clear(); self._opt_cstrs.clear()
         self._stop.clear()
+        self._set_sim_running(True)
         threading.Thread(target=self._run_worker, args=("optimize",), daemon=True).start()
 
     # =================================================================
@@ -373,8 +544,12 @@ class WorkflowWizard(WorkflowWizardFrame):
         import re
 
         try:
-            # 1) Push config
-            patch = self._build_config_patch()
+            # 1) Push config (includes validation)
+            try:
+                patch = self._build_config_patch()
+            except ValueError as ve:
+                wx.CallAfter(self._worker_error, mode, str(ve))
+                return
             if mode == "baseline":
                 patch["run.iters"] = 1  # single optimizer iteration for baseline
             resp = self._grpc.patch_config(patch)
@@ -445,6 +620,27 @@ class WorkflowWizard(WorkflowWizardFrame):
                             "gamma_mean": float(m_gamma.group(3)),
                             "solid_frac": float(m_gamma.group(4)),
                         })
+
+                    # Parse optimizer metrics from summary lines:
+                    # "  DissPower = 1234.5"  or  "  meanT = 305.2"
+                    # "  gradNorm = 0.0023"  or  "  G_oh = 1.5e-03"
+                    for metric_name in ["DissPower", "Disspower", "dissPower",
+                                        "meanT", "meantT", "MeanT",
+                                        "gradNorm", "GradNorm",
+                                        "G_oh", "volUse", "Voluse"]:
+                        m_metric = re.search(
+                            rf'{metric_name}\s*[=:]\s*([-+]?[\d.eE+-]+)', text)
+                        if m_metric and outer_iterations:
+                            outer_iterations[-1][metric_name] = float(m_metric.group(1))
+
+                    # Also try tab/space separated optimizer history lines
+                    # e.g. "  iter  dissPower  meanT  gradNorm  G_oh"
+                    # followed by "  1    1234.5   305.2  0.0023   1.5e-3"
+
+                    # Update multi-metric convergence plot when we have outer iteration data
+                    if outer_iterations and len(outer_iterations) > len(self._opt_iters):
+                        wx.CallAfter(self._update_optimizer_plot,
+                                     outer_iterations, webview)
 
                     # --- Also poll gRPC metrics periodically ---
                     line_count += 1
@@ -597,10 +793,12 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def _baseline_done(self, dissip, meanT):
         self.m_gaugeBaseline.SetValue(100)
-        self.m_txtBaseDissip.SetValue(f"{dissip:.2f}")
-        self.m_txtBaseMeanT.SetValue(f"{meanT:.2f}")
+        self.m_txtBaseDissip.SetLabel(f"{dissip:.2f}" if dissip else "—")
+        self.m_txtBaseMeanT.SetLabel(f"{meanT:.2f}" if meanT else "—")
         self.m_btnRunBaseline.Enable(True)
         self.m_statusLabel.SetLabel("Baseline complete.")
+        self._completed.add("baseline")
+        self._set_sim_running(False)
         if self.parapy_obj:
             try:
                 self.parapy_obj.baseline_dissipation = dissip
@@ -617,7 +815,9 @@ class WorkflowWizard(WorkflowWizardFrame):
                 _convergence_html(self._opt_iters, self._opt_objs,
                                   self._opt_cstrs, "Final Convergence"), "")
         self.m_btnStartOpt.Enable(True)
-        self.m_statusLabel.SetLabel("Optimization complete.")
+        self.m_statusLabel.SetLabel("Optimisation complete.")
+        self._completed.add("optimize")
+        self._set_sim_running(False)
         if self.parapy_obj:
             try:
                 self.parapy_obj.opt_dissipation = dissip
@@ -626,6 +826,7 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def _worker_error(self, mode, msg):
         self.m_statusLabel.SetLabel(f"{mode} failed: {msg}")
+        self._set_sim_running(False)
         if mode == "baseline":
             self.m_txtBaselineLog.AppendText(f"\n*** ERROR: {msg}\n")
             self.m_btnRunBaseline.Enable(True)
@@ -646,45 +847,622 @@ class WorkflowWizard(WorkflowWizardFrame):
     # =================================================================
 
     def onExportSTL(self, event):
-        self.m_statusLabel.SetLabel("Starting STL export…")
-        threading.Thread(target=self._stl_worker, daemon=True).start()
+        """Download existing STL files from the container.
+        Only runs gyroid_to_stl.py if no files exist yet."""
+        dlg = wx.DirDialog(self, "Save STL files to:", style=wx.DD_DEFAULT_STYLE)
+        if dlg.ShowModal() == wx.ID_OK:
+            out_dir = dlg.GetPath()
+            self.m_btnExportSTL.Enable(False)
+            self.m_statusLabel.SetLabel("Downloading STL…")
+            threading.Thread(target=self._stl_download_worker,
+                             args=(out_dir,), daemon=True).start()
+        dlg.Destroy()
 
-    def _stl_worker(self):
+    def _stl_download_worker(self, out_dir):
+        from pathlib import Path
+        saved = []
+
+        # Try downloading existing files first
+        for which in ["lattice", "encap", "surface"]:
+            try:
+                chunks = self._grpc.download_stl(which)
+                fh, path = None, None
+                for chunk in chunks:
+                    if not path:
+                        path = Path(out_dir) / chunk.filename
+                        fh = open(path, "wb")
+                    fh.write(chunk.data)
+                if fh:
+                    fh.close()
+                    saved.append(str(path))
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"Downloaded: {chunk.filename}")
+            except grpc.RpcError:
+                pass  # file doesn't exist for this type
+
+        if saved:
+            wx.CallAfter(self.m_btnExportSTL.Enable, True)
+            wx.CallAfter(self.m_btnViewSTL.Enable, True)
+            self._last_stl_paths = saved
+            wx.CallAfter(self.m_statusLabel.SetLabel,
+                         f"Saved {len(saved)} STL file(s) — opening viewer…")
+            wx.CallAfter(self._auto_view_stl)
+            return
+
+        # No files found — need to generate first
+        wx.CallAfter(self.m_statusLabel.SetLabel,
+                     "No STL files found — running gyroid_to_stl.py…")
         try:
             resp = self._grpc.start_stl()
-            wx.CallAfter(self.m_statusLabel.SetLabel, f"STL: {resp.message}")
+            wx.CallAfter(self.m_statusLabel.SetLabel, f"STL export: {resp.message}")
+
+            # Poll until done
             while True:
                 time.sleep(2)
                 st = self._grpc.get_stl_status()
                 state = pb2.RunStatusResponse.State.Name(st.state)
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"STL: {state}")
-                if state in ("IDLE", "FINISHED", "CRASHED"): break
-            from pathlib import Path
-            out = Path(".")
-            for which in ["lattice", "encap"]:
+                wx.CallAfter(self.m_statusLabel.SetLabel, f"Generating STL: {state}")
+                if state in ("IDLE", "FINISHED", "CRASHED"):
+                    break
+
+            # Now try downloading again
+            for which in ["lattice", "encap", "surface"]:
                 try:
                     chunks = self._grpc.download_stl(which)
                     fh, path = None, None
                     for chunk in chunks:
-                        if not path: path = out / chunk.filename; fh = open(path, "wb")
+                        if not path:
+                            path = Path(out_dir) / chunk.filename
+                            fh = open(path, "wb")
                         fh.write(chunk.data)
-                    if fh: fh.close()
-                    wx.CallAfter(self.m_statusLabel.SetLabel, f"Saved: {path}")
+                    if fh:
+                        fh.close()
+                        saved.append(str(path))
                 except grpc.RpcError:
                     pass
+
+            wx.CallAfter(self.m_statusLabel.SetLabel,
+                         f"Saved {len(saved)} STL file(s)")
+            if saved:
+                self._last_stl_paths = saved
+                wx.CallAfter(self.m_btnViewSTL.Enable, True)
+                wx.CallAfter(wx.MessageBox,
+                             "STL files saved:\n" + "\n".join(saved),
+                             "STL Export", wx.OK | wx.ICON_INFORMATION)
         except Exception as e:
             wx.CallAfter(self.m_statusLabel.SetLabel, f"STL error: {e}")
 
-    def onRunPySLM(self, event):
-        wx.MessageBox("PySLM analysis — connect to downloaded STL.", "PySLM", wx.OK|wx.ICON_INFORMATION)
+        wx.CallAfter(self.m_btnExportSTL.Enable, True)
 
-    def onExportSTEP(self, event):
-        obj = self.parapy_obj
-        if obj and hasattr(obj, "step_writer"):
-            try: obj.step_writer.write(); wx.MessageBox("STEP written.", "OK", wx.OK|wx.ICON_INFORMATION)
-            except Exception as e: wx.MessageBox(f"Failed: {e}", "Error", wx.OK|wx.ICON_ERROR)
-        else:
-            wx.MessageBox("No step_writer on model.", "STEP", wx.OK|wx.ICON_WARNING)
+    def onQuadMeshExport(self, event):
+        """Open the Quad Mesh → STEP Export dialog."""
+        from .GUIwxformbuilder import QuadMeshExportDialog
+
+        dlg = QuadMeshExportDialog(self)
+
+        # Wire up the dialog buttons
+        dlg.m_btnRunQuadMesh.Bind(wx.EVT_BUTTON, lambda e: self._qm_run(dlg))
+        dlg.m_btnConvertNurbs.Bind(wx.EVT_BUTTON, lambda e: self._qm_nurbs(dlg))
+        dlg.m_btnStopQuadMesh.Bind(wx.EVT_BUTTON, lambda e: self._qm_stop(dlg))
+        dlg.m_btnViewPyVista.Bind(wx.EVT_BUTTON, lambda e: self._qm_view_pyvista(dlg))
+        dlg.m_btnDownloadOBJ.Bind(wx.EVT_BUTTON, lambda e: self._qm_download_obj(dlg))
+        dlg.m_btnDownloadSTEP.Bind(wx.EVT_BUTTON, lambda e: self._qm_download_step(dlg))
+
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def _qm_run(self, dlg):
+        """Start quad-mesh generation on the server."""
+        extra_args = dlg.get_extra_args()
+        dlg.m_btnRunQuadMesh.Enable(False)
+        dlg.m_btnStopQuadMesh.Enable(True)
+        dlg.m_statusQM.SetLabel("Starting quad mesh…")
+        dlg.m_txtQMLog.Clear()
+
+        def worker():
+            try:
+                stub = self._grpc.stub
+
+                # Start quad mesh — exact method from client.py
+                resp = stub.StartGyroidToQuadMesh(
+                    pb2.QuadMeshRequest(extra_args=extra_args))
+                wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                             f"Started: {resp.message}\n")
+                if not resp.success:
+                    wx.CallAfter(dlg.m_statusQM.SetLabel, f"Failed: {resp.message}")
+                    wx.CallAfter(dlg.m_btnRunQuadMesh.Enable, True)
+                    wx.CallAfter(dlg.m_btnStopQuadMesh.Enable, False)
+                    return
+
+                # Stream output
+                try:
+                    for line in stub.StreamGyroidToQuadMeshOutput(pb2.Empty()):
+                        ts = time.strftime("%H:%M:%S",
+                                          time.localtime(line.timestamp_ms / 1000))
+                        wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                     f"[{ts}] {line.line}\n")
+                except grpc.RpcError:
+                    pass
+
+                wx.CallAfter(dlg.m_statusQM.SetLabel, "Quad mesh complete.")
+                wx.CallAfter(dlg.m_btnRunQuadMesh.Enable, True)
+                wx.CallAfter(dlg.m_btnStopQuadMesh.Enable, False)
+                wx.CallAfter(dlg.m_btnConvertNurbs.Enable, True)
+                wx.CallAfter(dlg.m_btnViewPyVista.Enable, True)
+                wx.CallAfter(dlg.m_btnDownloadOBJ.Enable, True)
+
+                # Auto-render preview into WebView
+                wx.CallAfter(self._qm_render_preview, dlg)
+
+            except grpc.RpcError as e:
+                wx.CallAfter(dlg.m_statusQM.SetLabel,
+                             f"Error: {e.details() if hasattr(e,'details') else e}")
+                wx.CallAfter(dlg.m_txtQMLog.AppendText, f"\nERROR: {e}\n")
+                wx.CallAfter(dlg.m_btnRunQuadMesh.Enable, True)
+                wx.CallAfter(dlg.m_btnStopQuadMesh.Enable, False)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _qm_stop(self, dlg):
+        try:
+            self._grpc.stub.StopGyroidToQuadMesh(pb2.Empty())
+            dlg.m_statusQM.SetLabel("Stopped.")
+        except Exception as e:
+            dlg.m_statusQM.SetLabel(f"Stop error: {e}")
+
+    def _qm_download_obj(self, dlg):
+        """Download the OBJ file(s) from the server via DownloadNurbsFile."""
+        save_dlg = wx.DirDialog(self, "Save OBJ files to:")
+        if save_dlg.ShowModal() == wx.ID_OK:
+            out_dir = save_dlg.GetPath()
+            sheets = dlg.get_sheet_selection()
+            def worker():
+                from pathlib import Path
+                saved = []
+                for sheet in sheets:
+                    try:
+                        chunks = self._grpc.stub.DownloadNurbsFile(
+                            pb2.NurbsFileRequest(which=sheet, format="obj"))
+                        fh, path = None, None
+                        for chunk in chunks:
+                            if not path:
+                                path = Path(out_dir) / chunk.filename
+                                fh = open(path, "wb")
+                            fh.write(chunk.data)
+                        if fh:
+                            fh.close(); saved.append(str(path))
+                    except grpc.RpcError as e:
+                        wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                     f"Download {sheet} OBJ: {e}\n")
+                wx.CallAfter(dlg.m_statusQM.SetLabel,
+                             f"OBJ saved: {', '.join(saved) if saved else 'none'}")
+                if saved:
+                    self._last_obj_path = saved[0]
+            threading.Thread(target=worker, daemon=True).start()
+        save_dlg.Destroy()
+
+    def _qm_nurbs(self, dlg):
+        """Run quad_to_nurbs.py on the server to convert OBJ → STEP."""
+        sheets = dlg.get_sheet_selection()
+        nurbs_args = dlg.get_nurbs_args()
+        dlg.m_btnConvertNurbs.Enable(False)
+        dlg.m_statusQM.SetLabel("Converting to NURBS…")
+
+        def worker():
+            for sheet in sheets:
+                try:
+                    wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                 f"\n── Converting {sheet} sheet to STEP ──\n")
+                    resp = self._grpc.stub.StartQuadToNurbs(
+                        pb2.QuadToNurbsRequest(which=sheet, extra_args=nurbs_args))
+                    wx.CallAfter(dlg.m_txtQMLog.AppendText, f"{resp.message}\n")
+                    if not resp.success:
+                        continue
+
+                    # Stream output
+                    try:
+                        for line in self._grpc.stub.StreamQuadToNurbsOutput(pb2.Empty()):
+                            ts = time.strftime("%H:%M:%S",
+                                              time.localtime(line.timestamp_ms / 1000))
+                            wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                         f"[{ts}] {line.line}\n")
+                    except grpc.RpcError:
+                        pass
+
+                except grpc.RpcError as e:
+                    wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                 f"NURBS error ({sheet}): {e}\n")
+
+            wx.CallAfter(dlg.m_statusQM.SetLabel, "NURBS conversion complete.")
+            wx.CallAfter(dlg.m_btnConvertNurbs.Enable, True)
+            wx.CallAfter(dlg.m_btnDownloadSTEP.Enable, True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _qm_download_step(self, dlg):
+        """Download the STEP file(s) from the server."""
+        save_dlg = wx.DirDialog(self, "Save STEP files to:")
+        if save_dlg.ShowModal() == wx.ID_OK:
+            out_dir = save_dlg.GetPath()
+            sheets = dlg.get_sheet_selection()
+            def worker():
+                from pathlib import Path
+                saved = []
+                for sheet in sheets:
+                    try:
+                        chunks = self._grpc.stub.DownloadNurbsFile(
+                            pb2.NurbsFileRequest(which=sheet, format="step"))
+                        fh, path = None, None
+                        for chunk in chunks:
+                            if not path:
+                                path = Path(out_dir) / chunk.filename
+                                fh = open(path, "wb")
+                            fh.write(chunk.data)
+                        if fh:
+                            fh.close(); saved.append(str(path))
+                    except grpc.RpcError as e:
+                        wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                     f"Download {sheet} STEP: {e}\n")
+                wx.CallAfter(dlg.m_statusQM.SetLabel,
+                             f"STEP saved: {', '.join(saved) if saved else 'none'}")
+                if saved:
+                    wx.CallAfter(wx.MessageBox,
+                                 "STEP files saved:\n" + "\n".join(saved),
+                                 "STEP Download", wx.OK | wx.ICON_INFORMATION)
+            threading.Thread(target=worker, daemon=True).start()
+        save_dlg.Destroy()
+
+    def _qm_render_preview(self, dlg):
+        """Download OBJ to temp dir and render preview into the dialog's WebView."""
+        def worker():
+            import tempfile
+            from pathlib import Path
+            tmp_dir = Path(tempfile.mkdtemp())
+            saved = []
+            for sheet in ["plus", "minus"]:
+                try:
+                    chunks = self._grpc.stub.DownloadNurbsFile(
+                        pb2.NurbsFileRequest(which=sheet, format="obj"))
+                    fh, path = None, None
+                    for chunk in chunks:
+                        if not path:
+                            path = tmp_dir / chunk.filename; fh = open(path, "wb")
+                        fh.write(chunk.data)
+                    if fh: fh.close(); saved.append(str(path))
+                except grpc.RpcError:
+                    pass
+            if saved:
+                self._last_obj_path = saved[0]
+                wx.CallAfter(self._render_mesh_to_webview, saved, dlg.m_webviewQMPreview)
+            else:
+                wx.CallAfter(dlg.m_statusQM.SetLabel, "Could not download OBJ for preview.")
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_mesh_to_webview(self, mesh_paths, webview):
+        """Render mesh files off-screen and display as image in a WebView."""
+        try:
+            import pyvista as pv
+            import base64, tempfile
+            from pathlib import Path
+
+            plotter = pv.Plotter(off_screen=True, window_size=[900, 650])
+            body_colors = {
+                "lattice": "#4A90D9",   # steel blue
+                "encap": "#F5A623",     # amber
+                "surface": "#7ED321",   # green
+                "plus": "#4A90D9",
+                "minus": "#D94A4A",     # red
+            }
+            body_opacities = {
+                "lattice": 1.0,
+                "encap": 0.3,           # transparent encapsulation
+                "surface": 0.8,
+                "plus": 0.9,
+                "minus": 0.9,
+            }
+            for path in mesh_paths:
+                try:
+                    mesh = pv.read(path)
+                    fname = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+                    body = "lattice"
+                    for key in body_colors:
+                        if key in fname: body = key; break
+                    plotter.add_mesh(mesh,
+                        color=body_colors.get(body, "#4A90D9"),
+                        opacity=body_opacities.get(body, 0.9),
+                        show_edges=("quad" in fname or "obj" in fname.split(".")[-1]),
+                        edge_color="#888888", line_width=0.3,
+                        smooth_shading=True, label=fname)
+                except Exception:
+                    pass
+
+            plotter.add_axes()
+            plotter.set_background("#FAFAFA")
+            plotter.camera_position = "iso"
+
+            tmp = Path(tempfile.mktemp(suffix=".png"))
+            plotter.screenshot(str(tmp))
+            plotter.close()
+
+            b64 = base64.b64encode(tmp.read_bytes()).decode()
+            tmp.unlink(missing_ok=True)
+
+            html = (f'<html><body style="margin:0;display:flex;align-items:center;'
+                    f'justify-content:center;height:100%;background:#FAFAFA">'
+                    f'<img src="data:image/png;base64,{b64}" '
+                    f'style="max-width:100%;max-height:100%;object-fit:contain"/>'
+                    f'</body></html>')
+            webview.SetPage(html, "")
+        except ImportError:
+            webview.SetPage('<html><body style="display:flex;align-items:center;'
+                'justify-content:center;height:100%;color:#999;font-family:sans-serif">'
+                '<p>PyVista not installed — pip install pyvista</p></body></html>', "")
+        except Exception as e:
+            webview.SetPage(f'<html><body style="padding:20px;color:#c00">'
+                f'<p>Render error: {e}</p></body></html>', "")
+
+    def _qm_view_pyvista(self, dlg):
+        """Open interactive PyVista window (fallback for detailed inspection)."""
+        obj_path = getattr(self, "_last_obj_path", None)
+        if not obj_path:
+            dlg.m_statusQM.SetLabel("No OBJ available yet.")
+            return
+        try:
+            import pyvista as pv
+            mesh = pv.read(obj_path)
+            plotter = pv.Plotter(title="Quad Mesh — Interactive")
+            plotter.add_mesh(mesh, show_edges=True, color="lightblue",
+                             edge_color="gray", opacity=0.9)
+            plotter.add_axes(); plotter.show_grid()
+            plotter.show(interactive=True)
+        except ImportError:
+            wx.MessageBox("pip install pyvista", "PyVista", wx.OK|wx.ICON_WARNING)
+        except Exception as e:
+            wx.MessageBox(f"Failed: {e}", "Error", wx.OK|wx.ICON_ERROR)
+
+    def _update_optimizer_plot(self, outer_iterations, webview):
+        """Build a multi-subplot Plotly chart — one subplot per metric."""
+        if not outer_iterations:
+            return
+
+        iters = [d.get("iter", i) for i, d in enumerate(outer_iterations)]
+        self._opt_iters = iters
+
+        # Collect available metrics
+        all_keys = set()
+        for d in outer_iterations:
+            all_keys.update(k for k in d.keys() if k != "iter")
+
+        # Prioritised metrics with display names
+        metric_config = [
+            (["DissPower", "Disspower", "dissPower"], "Dissipation Power (W)"),
+            (["meanT", "meantT", "MeanT"], "Mean Temperature (K)"),
+            (["gradNorm", "GradNorm"], "Gradient Norm"),
+            (["G_oh"], "Overhang Penalty"),
+            (["solid_frac"], "Solid Fraction"),
+            (["volUse", "Voluse"], "Volume Usage"),
+        ]
+
+        # Find which metrics are available
+        available = []
+        for candidates, label in metric_config:
+            for c in candidates:
+                if c in all_keys:
+                    available.append((c, label))
+                    break
+
+        if not available:
+            return
+
+        n = len(available)
+        traces = []
+        for i, (metric, label) in enumerate(available):
+            values = [d.get(metric, None) for d in outer_iterations]
+            traces.append({
+                "x": iters, "y": values,
+                "mode": "lines+markers",
+                "name": label,
+                "xaxis": f"x{i+1}" if i > 0 else "x",
+                "yaxis": f"y{i+1}" if i > 0 else "y",
+                "marker": {"size": 4},
+            })
+
+        # Build subplot layout
+        layout = {
+            "template": "plotly_white",
+            "margin": {"t": 30, "b": 40, "l": 55, "r": 20},
+            "showlegend": False,
+            "grid": {"rows": n, "columns": 1, "pattern": "independent", "roworder": "top to bottom"},
+        }
+        for i, (metric, label) in enumerate(available):
+            suffix = str(i+1) if i > 0 else ""
+            layout[f"xaxis{suffix}"] = {"title": "Iteration" if i == n-1 else ""}
+            layout[f"yaxis{suffix}"] = {"title": label}
+
+        webview.SetPage(_plotly_html(traces, layout), "")
+
+    def _auto_view_stl(self):
+        """Automatically render STL preview into the results WebView."""
+        self._render_mesh_to_webview(self._last_stl_paths, self.m_webviewResults)
+        self.m_statusLabel.SetLabel(f"Saved {len(self._last_stl_paths)} STL file(s) — preview rendered.")
+
+    def onViewSTL(self, event):
+        """Open interactive PyVista window for detailed STL inspection."""
+        paths = getattr(self, "_last_stl_paths", [])
+        if not paths:
+            wx.MessageBox("Download the STL files first.",
+                          "View STL", wx.OK | wx.ICON_INFORMATION)
+            return
+        self._view_stl_interactive(paths)
+
+    def _view_stl_interactive(self, paths):
+        """Open PyVista with per-body toggles and transparency controls."""
+        try:
+            import pyvista as pv
+            plotter = pv.Plotter(title="Heat Exchanger — Interactive Viewer")
+            body_colors = {"lattice": "#4A90D9", "encap": "#F5A623", "surface": "#7ED321"}
+            body_opacity = {"lattice": 1.0, "encap": 0.3, "surface": 0.8}
+            actors = {}
+            for path in paths:
+                try:
+                    mesh = pv.read(path)
+                    fname = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    body = "lattice"
+                    for key in body_colors:
+                        if key in fname.lower(): body = key; break
+                    actor = plotter.add_mesh(mesh, show_edges=False,
+                        color=body_colors.get(body, "#4A90D9"),
+                        opacity=body_opacity.get(body, 1.0),
+                        smooth_shading=True, label=fname)
+                    actors[body] = actor
+                except Exception as e:
+                    print(f"Could not load {path}: {e}")
+            # Per-body toggle checkboxes
+            y_pos = 10
+            for body, actor in actors.items():
+                def make_toggle(a):
+                    def cb(flag): a.SetVisibility(flag)
+                    return cb
+                plotter.add_checkbox_button_widget(make_toggle(actor), value=True,
+                    position=(10, y_pos), size=25,
+                    color_on=body_colors.get(body, "#4A90D9"))
+                plotter.add_text(body, position=(40, y_pos + 2),
+                    font_size=9, color="black")
+                y_pos += 35
+            plotter.add_axes(); plotter.add_legend()
+            plotter.set_background("#FAFAFA")
+            plotter.show_grid()
+            plotter.show(interactive=True)
+        except ImportError:
+            wx.MessageBox("pip install pyvista", "PyVista", wx.OK|wx.ICON_WARNING)
+        except Exception as e:
+            wx.MessageBox(f"Failed: {e}", "PyVista Error", wx.OK|wx.ICON_ERROR)
+
+    def onServerStatus(self, event):
+        """Show the current server run status."""
+        try:
+            resp = self._grpc.get_status()
+            state = pb2.RunStatusResponse.State.Name(resp.state)
+            wx.MessageBox(
+                f"State: {state}\n"
+                f"PID: {resp.pid or '—'}\n"
+                f"Return code: {resp.return_code}\n"
+                f"Message: {resp.message}",
+                "Server Status", wx.OK | wx.ICON_INFORMATION)
+        except grpc.RpcError as e:
+            wx.MessageBox(f"Cannot reach server:\n{e}",
+                          "Server Status", wx.OK | wx.ICON_ERROR)
+
+    def onListFiles(self, event):
+        """List files on the server and show in a dialog."""
+        try:
+            resp = self._grpc.stub.ListFiles(pb2.ListFilesRequest(path=""))
+            if resp.success:
+                file_list = "\n".join(resp.paths[:100])  # limit display
+                dlg = wx.TextEntryDialog(self, "Server files (app/):",
+                                         "List Files", file_list,
+                                         style=wx.OK | wx.TE_MULTILINE)
+                dlg.SetSize(500, 400)
+                dlg.ShowModal()
+                dlg.Destroy()
+            else:
+                wx.MessageBox(f"Error: {resp.error}", "List Files", wx.OK | wx.ICON_ERROR)
+        except grpc.RpcError as e:
+            wx.MessageBox(f"Cannot reach server:\n{e}",
+                          "List Files", wx.OK | wx.ICON_ERROR)
+
+    def onDownloadApp(self, event):
+        """Download the entire app/ folder as a tar.gz."""
+        dlg = wx.DirDialog(self, "Save case folder to:")
+        if dlg.ShowModal() == wx.ID_OK:
+            out_dir = dlg.GetPath()
+            self.m_statusLabel.SetLabel("Downloading full case…")
+
+            def worker():
+                from pathlib import Path
+                try:
+                    chunks = self._grpc.stub.DownloadFile(
+                        pb2.DownloadRequest(path="", as_tar=True))
+                    fh, path = None, None
+                    for chunk in chunks:
+                        if not path:
+                            path = Path(out_dir) / chunk.filename
+                            fh = open(path, "wb")
+                        fh.write(chunk.data)
+                    if fh:
+                        fh.close()
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"Case saved: {path}")
+                    wx.CallAfter(wx.MessageBox,
+                                 f"Full case saved:\n{path}",
+                                 "Download", wx.OK | wx.ICON_INFORMATION)
+                except Exception as e:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"Download error: {e}")
+            threading.Thread(target=worker, daemon=True).start()
+        dlg.Destroy()
+
+    def onRunPySLM(self, event):
+        """Run PySLM manufacturability analysis on the downloaded STL."""
+        paths = getattr(self, "_last_stl_paths", [])
+        if not paths:
+            wx.MessageBox("Download the STL files first (Export & Download STL button).",
+                          "PySLM", wx.OK|wx.ICON_INFORMATION)
+            return
+        self.m_statusLabel.SetLabel("Running PySLM analysis…")
+
+        def worker():
+            try:
+                import pyslm
+                import pyslm.analysis
+                import trimesh
+                results = []
+                for path in paths:
+                    fname = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    try:
+                        mesh = trimesh.load(path)
+                        # Basic mesh quality metrics
+                        area = mesh.area
+                        volume = mesh.volume if mesh.is_watertight else 0
+                        bounds = mesh.bounds
+                        size = bounds[1] - bounds[0]
+                        results.append(
+                            f"── {fname} ──\n"
+                            f"  Vertices: {len(mesh.vertices):,}\n"
+                            f"  Faces: {len(mesh.faces):,}\n"
+                            f"  Surface area: {area:.1f} mm²\n"
+                            f"  Volume: {volume:.1f} mm³\n"
+                            f"  Watertight: {mesh.is_watertight}\n"
+                            f"  Bounding box: {size[0]:.1f} × {size[1]:.1f} × {size[2]:.1f} mm\n"
+                        )
+                    except Exception as e:
+                        results.append(f"── {fname} ──\n  Error: {e}\n")
+                report = "\n".join(results)
+                wx.CallAfter(self._show_pyslm_report, report)
+            except ImportError:
+                wx.CallAfter(wx.MessageBox,
+                    "PySLM or trimesh not installed.\n\n"
+                    "Install with: pip install pyslm trimesh",
+                    "PySLM", wx.OK|wx.ICON_WARNING)
+            except Exception as e:
+                wx.CallAfter(self.m_statusLabel.SetLabel, f"PySLM error: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_pyslm_report(self, report):
+        """Show PySLM results in a dialog."""
+        self.m_statusLabel.SetLabel("PySLM analysis complete.")
+        dlg = wx.Dialog(self, title="PySLM Manufacturability Report",
+                        size=(500, 400), style=wx.DEFAULT_DIALOG_STYLE|wx.RESIZE_BORDER)
+        sz = wx.BoxSizer(wx.VERTICAL)
+        txt = wx.TextCtrl(dlg, value=report, style=wx.TE_MULTILINE|wx.TE_READONLY)
+        txt.SetFont(wx.Font(9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        sz.Add(txt, 1, wx.EXPAND|wx.ALL, 10)
+        btn = wx.Button(dlg, wx.ID_OK, "Close")
+        sz.Add(btn, 0, wx.ALIGN_RIGHT|wx.ALL, 10)
+        dlg.SetSizer(sz)
+        dlg.ShowModal()
+        dlg.Destroy()
 
     def onDownloadHistory(self, event):
         """Download full optimization history and save as TSV."""

@@ -72,12 +72,12 @@ class HeatExchanger(GeomBase):
     enc_width:         float = Input(0.05)
     enc_height:        float = Input(0.05)
     enc_wall_thickness:float = Input(0.002)
-    inlet_diameter:    float = Input(0.010)
-    outlet_diameter:   float = Input(0.010)
+    inlet_bore_width:  float = Input(0.010)
+    inlet_bore_height: float = Input(0.015)
+    outlet_bore_width: float = Input(0.010)
+    outlet_bore_height: float = Input(0.015)
     tube_wall:         float = Input(0.001)
     tube_length:       float = Input(0.020)
-    flange_diameter:   float = Input(0.020)
-    flange_thickness:  float = Input(0.003)
 
     # ── environment ──────────────────────────────────────────────────
 
@@ -160,12 +160,12 @@ class HeatExchanger(GeomBase):
             width=self.enc_width,
             height=self.enc_height,
             wall_thickness=self.enc_wall_thickness,
-            inlet_diameter=self.inlet_diameter,
-            outlet_diameter=self.outlet_diameter,
+            inlet_bore_width=self.inlet_bore_width,
+            inlet_bore_height=self.inlet_bore_height,
+            outlet_bore_width=self.outlet_bore_width,
+            outlet_bore_height=self.outlet_bore_height,
             tube_wall=self.tube_wall,
             tube_length=self.tube_length,
-            flange_diameter=self.flange_diameter,
-            flange_thickness=self.flange_thickness,
             position=self.position,
         )
 
@@ -382,11 +382,17 @@ class HeatExchanger(GeomBase):
         """Merge all inputs into a config patch and push to gRPC server.
 
         Keys match the actual gyroid_case_config.yaml structure.
-        NOTE: geometry.size_mm, cells, and window coordinates are NOT
-        pushed — the blockMeshDict is fixed at 100mm. Only flow, thermal,
-        and optimization params are sent.
+        Geometry is pushed from the current enclosure dimensions so STL,
+        quad mesh, and optimization runs all use the edited model rather
+        than whatever geometry happened to be active on the server.
         """
         cfg: dict = {}
+
+        # geometry
+        cfg["geometry.length"] = self.enc_length
+        cfg["geometry.width"] = self.enc_width
+        cfg["geometry.height"] = self.enc_height
+        cfg["geometry.wall_thickness"] = self.enc_wall_thickness
 
         # inlet
         cfg["inlet.velocity_magnitude"] = self.inflow_velocity

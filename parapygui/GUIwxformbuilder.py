@@ -63,10 +63,6 @@ class WorkflowWizardFrame ( wx.Frame ):
             sbDom.Add(wx.StaticText(sbDom.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
             s = wx.SpinCtrlDouble(sbDom.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 2000, val, 5)
             setattr(self, attr, s); sbDom.Add(s, 0, wx.ALL, 4)
-        sbDom.Add(wx.StaticText(sbDom.GetStaticBox(), wx.ID_ANY, _(u"  Flow axis:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 12)
-        self.m_choiceFlowAxis = wx.Choice(sbDom.GetStaticBox(), wx.ID_ANY, choices=["x","y","z"])
-        self.m_choiceFlowAxis.SetSelection(2)
-        sbDom.Add(self.m_choiceFlowAxis, 0, wx.ALL, 4)
         szG.Add(sbDom, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- encapsulation --
@@ -124,8 +120,27 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbMat.Add(fgMat, 0, wx.EXPAND|wx.ALL, 5)
         szG.Add(sbMat, 0, wx.EXPAND|wx.ALL, 5)
 
+        # -- run settings (applies to all simulations) --
+        sbRun = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Run Settings")), wx.HORIZONTAL)
+        sbRun.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"10", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 10)
+        sbRun.Add(self.m_spinCores, 0, wx.ALL, 4)
+        sbRun.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinMaxIter = wx.SpinCtrlDouble(sbRun.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 5000, 100, 10)
+        sbRun.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
+        szG.Add(sbRun, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- file operations --
+        szFileOps = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnLoadJSON = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Load Config (JSON)…"))
+        self.m_btnLoadJSON.SetToolTip("ⓘ Load a previously saved configuration from the inputs/ folder")
+        szFileOps.Add(self.m_btnLoadJSON, 0, wx.ALL, 5)
+        self.m_btnSaveJSON = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Save Config (JSON)…"))
+        self.m_btnSaveJSON.SetToolTip("ⓘ Save current settings to the outputs/ folder for later reuse")
+        szFileOps.Add(self.m_btnSaveJSON, 0, wx.ALL, 5)
         self.m_btnApplyGeom = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Apply to model"))
-        szG.Add(self.m_btnApplyGeom, 0, wx.ALL, 10)
+        szFileOps.Add(self.m_btnApplyGeom, 0, wx.ALL, 5)
+        szG.Add(szFileOps, 0, wx.ALL, 5)
         self.m_panelGeom.SetSizer(szG); self.m_panelGeom.Layout(); szG.Fit(self.m_panelGeom)
         self.m_simplebook.AddPage(self.m_panelGeom, u"Geometry", True)
 
@@ -145,8 +160,14 @@ class WorkflowWizardFrame ( wx.Frame ):
             setattr(self, attr, t); fgSE.Add(t, 1, wx.EXPAND)
         sbSE.Add(fgSE, 0, wx.EXPAND|wx.ALL, 5)
         szSE.Add(sbSE, 0, wx.EXPAND|wx.ALL, 10)
-        self.m_webviewSE = wx.html2.WebView.New(self.m_panelSE)
-        szSE.Add(self.m_webviewSE, 1, wx.EXPAND|wx.ALL, 10)
+        # Info note
+        info = wx.StaticText(self.m_panelSE, wx.ID_ANY,
+            _(u"ⓘ These values are computed from the semi-empirical correlations "
+              u"(Cheng et al. 2023, DOI: 10.1016/j.enconman.2023.116955). "
+              u"Replace placeholder Dittus-Boelter fits with actual gyroid TPMS data for production use."))
+        info.Wrap(600)
+        info.SetForegroundColour(wx.Colour(120, 120, 120))
+        szSE.Add(info, 0, wx.ALL, 10)
         self.m_panelSE.SetSizer(szSE); self.m_panelSE.Layout(); szSE.Fit(self.m_panelSE)
         self.m_simplebook.AddPage(self.m_panelSE, u"Sizing", False)
 
@@ -155,18 +176,20 @@ class WorkflowWizardFrame ( wx.Frame ):
         # =============================================================
         self.m_panelBaseline = wx.Panel(self.m_simplebook)
         szBL = wx.BoxSizer(wx.VERTICAL)
-        self.m_btnRunBaseline = wx.Button(self.m_panelBaseline, wx.ID_ANY, _(u"Push Config & Run Baseline"))
+        self.m_btnRunBaseline = wx.Button(self.m_panelBaseline, wx.ID_ANY, _(u"Run Baseline Simulation"))
+        self.m_btnRunBaseline.SetToolTip("ⓘ Runs a single optimizer iteration with the uniform gyroid (dk=0). Establishes reference dissipation and temperature.")
         szBL.Add(self.m_btnRunBaseline, 0, wx.ALL, 10)
         self.m_gaugeBaseline = wx.Gauge(self.m_panelBaseline, wx.ID_ANY, 100, wx.DefaultPosition, wx.Size(-1,20))
         szBL.Add(self.m_gaugeBaseline, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 10)
         self.m_txtBaselineLog = wx.TextCtrl(self.m_panelBaseline, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(-1,140), wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL)
         self.m_txtBaselineLog.SetFont(mono)
-        szBL.Add(self.m_txtBaselineLog, 0, wx.EXPAND|wx.ALL, 10)
+        szBL.Add(self.m_txtBaselineLog, 1, wx.EXPAND|wx.ALL, 10)
         sbBR = wx.StaticBoxSizer(wx.StaticBox(self.m_panelBaseline, wx.ID_ANY, _(u"Results")), wx.HORIZONTAL)
         for lbl, attr in [("Dissipation (W):", "m_txtBaseDissip"), ("Mean Temp (K):", "m_txtBaseMeanT")]:
             sbBR.Add(wx.StaticText(sbBR.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-            t = wx.TextCtrl(sbBR.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(100,-1), wx.TE_READONLY)
-            setattr(self, attr, t); sbBR.Add(t, 0, wx.ALL, 4)
+            t = wx.StaticText(sbBR.GetStaticBox(), wx.ID_ANY, u"—", wx.DefaultPosition, wx.Size(100,-1))
+            t.SetForegroundColour(wx.Colour(0, 100, 180))
+            setattr(self, attr, t); sbBR.Add(t, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
         szBL.Add(sbBR, 0, wx.EXPAND|wx.ALL, 10)
         self.m_webviewBaseline = wx.html2.WebView.New(self.m_panelBaseline)
         szBL.Add(self.m_webviewBaseline, 1, wx.EXPAND|wx.ALL, 10)
@@ -195,7 +218,6 @@ class WorkflowWizardFrame ( wx.Frame ):
             ("Wall thickness (cells):", "m_spinWallCells",  1, 50, 6, 1),
             ("Unit cell size (cells):", "m_spinUnitCells",  5, 200, 75, 5),
             ("Overhang angle (°):",    "m_spinAmTheta",    0, 90, 45, 1),
-            ("Max iterations:",        "m_spinMaxIter",    10, 5000, 100, 10),
             ("kbound:",                "m_spinKbound",     0.001, 1.0, 0.08, 0.01),
         ]:
             fgC.Add(wx.StaticText(sbCstr.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
@@ -217,13 +239,14 @@ class WorkflowWizardFrame ( wx.Frame ):
         # =============================================================
         self.m_panelMonitor = wx.Panel(self.m_simplebook)
         szMon = wx.BoxSizer(wx.VERTICAL)
-        self.m_btnStartOpt = wx.Button(self.m_panelMonitor, wx.ID_ANY, _(u"Push Config & Start Optimization"))
+        self.m_btnStartOpt = wx.Button(self.m_panelMonitor, wx.ID_ANY, _(u"Start Optimisation"))
+        self.m_btnStartOpt.SetToolTip("ⓘ Pushes config to the Docker server and starts the MMA adjoint topology optimiser. Monitor convergence in real-time below.")
         szMon.Add(self.m_btnStartOpt, 0, wx.ALL, 10)
         self.m_webviewConvergence = wx.html2.WebView.New(self.m_panelMonitor)
         szMon.Add(self.m_webviewConvergence, 1, wx.EXPAND|wx.ALL, 5)
         self.m_txtSolverLog = wx.TextCtrl(self.m_panelMonitor, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(-1,140), wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL)
         self.m_txtSolverLog.SetFont(mono)
-        szMon.Add(self.m_txtSolverLog, 0, wx.EXPAND|wx.ALL, 5)
+        szMon.Add(self.m_txtSolverLog, 1, wx.EXPAND|wx.ALL, 5)
         self.m_panelMonitor.SetSizer(szMon); self.m_panelMonitor.Layout(); szMon.Fit(self.m_panelMonitor)
         self.m_simplebook.AddPage(self.m_panelMonitor, u"Monitor", False)
 
@@ -242,15 +265,28 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbFin.Add(fgF, 0, wx.EXPAND|wx.ALL, 5)
         szRes.Add(sbFin, 0, wx.EXPAND|wx.ALL, 10)
         szBtns = wx.BoxSizer(wx.HORIZONTAL)
-        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export STL"))
+        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export & Download STL"))
         szBtns.Add(self.m_btnExportSTL, 0, wx.ALL, 5)
+        self.m_btnViewSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"View STL (PyVista)"))
+        self.m_btnViewSTL.Enable(False)
+        szBtns.Add(self.m_btnViewSTL, 0, wx.ALL, 5)
+        self.m_btnQuadMesh = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Quad Mesh Export (STEP)…"))
+        szBtns.Add(self.m_btnQuadMesh, 0, wx.ALL, 5)
         self.m_btnPySLM = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Run PySLM"))
         szBtns.Add(self.m_btnPySLM, 0, wx.ALL, 5)
-        self.m_btnExportSTEP = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export STEP"))
-        szBtns.Add(self.m_btnExportSTEP, 0, wx.ALL, 5)
         self.m_btnDownloadHist = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Download History"))
         szBtns.Add(self.m_btnDownloadHist, 0, wx.ALL, 5)
         szRes.Add(szBtns, 0, wx.ALL, 5)
+
+        # utility row
+        szUtil = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnServerStatus = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Server Status"))
+        szUtil.Add(self.m_btnServerStatus, 0, wx.ALL, 5)
+        self.m_btnListFiles = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"List Server Files"))
+        szUtil.Add(self.m_btnListFiles, 0, wx.ALL, 5)
+        self.m_btnDownloadApp = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Download Full Case"))
+        szUtil.Add(self.m_btnDownloadApp, 0, wx.ALL, 5)
+        szRes.Add(szUtil, 0, wx.ALL, 5)
         self.m_webviewResults = wx.html2.WebView.New(self.m_panelResults)
         szRes.Add(self.m_webviewResults, 1, wx.EXPAND|wx.ALL, 10)
         self.m_panelResults.SetSizer(szRes); self.m_panelResults.Layout(); szRes.Fit(self.m_panelResults)
@@ -277,22 +313,243 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnBack.Bind(wx.EVT_BUTTON, self.onBack)
         self.m_btnNext.Bind(wx.EVT_BUTTON, self.onNext)
         self.m_btnApplyGeom.Bind(wx.EVT_BUTTON, self.onApplyGeom)
+        self.m_btnLoadJSON.Bind(wx.EVT_BUTTON, self.onLoadJSON)
+        self.m_btnSaveJSON.Bind(wx.EVT_BUTTON, self.onSaveJSON)
         self.m_btnApplyOpt.Bind(wx.EVT_BUTTON, self.onApplyOpt)
         self.m_btnRunBaseline.Bind(wx.EVT_BUTTON, self.onRunBaseline)
         self.m_btnStartOpt.Bind(wx.EVT_BUTTON, self.onStartOpt)
         self.m_btnExportSTL.Bind(wx.EVT_BUTTON, self.onExportSTL)
+        self.m_btnViewSTL.Bind(wx.EVT_BUTTON, self.onViewSTL)
+        self.m_btnQuadMesh.Bind(wx.EVT_BUTTON, self.onQuadMeshExport)
         self.m_btnPySLM.Bind(wx.EVT_BUTTON, self.onRunPySLM)
-        self.m_btnExportSTEP.Bind(wx.EVT_BUTTON, self.onExportSTEP)
         self.m_btnDownloadHist.Bind(wx.EVT_BUTTON, self.onDownloadHistory)
+        self.m_btnServerStatus.Bind(wx.EVT_BUTTON, self.onServerStatus)
+        self.m_btnListFiles.Bind(wx.EVT_BUTTON, self.onListFiles)
+        self.m_btnDownloadApp.Bind(wx.EVT_BUTTON, self.onDownloadApp)
 
     def __del__( self ): pass
     def onBack( self, event ): event.Skip()
     def onNext( self, event ): event.Skip()
     def onApplyGeom( self, event ): event.Skip()
+    def onLoadJSON( self, event ): event.Skip()
+    def onSaveJSON( self, event ): event.Skip()
     def onApplyOpt( self, event ): event.Skip()
     def onRunBaseline( self, event ): event.Skip()
     def onStartOpt( self, event ): event.Skip()
     def onExportSTL( self, event ): event.Skip()
+    def onViewSTL( self, event ): event.Skip()
+    def onQuadMeshExport( self, event ): event.Skip()
     def onRunPySLM( self, event ): event.Skip()
-    def onExportSTEP( self, event ): event.Skip()
     def onDownloadHistory( self, event ): event.Skip()
+    def onServerStatus( self, event ): event.Skip()
+    def onListFiles( self, event ): event.Skip()
+    def onDownloadApp( self, event ): event.Skip()
+
+###########################################################################
+## Class QuadMeshExportDialog
+###########################################################################
+
+class QuadMeshExportDialog ( wx.Dialog ):
+    """Popup dialog for CGAL quad-mesh → NURBS STEP pipeline."""
+
+    def __init__( self, parent ):
+        wx.Dialog.__init__( self, parent, id=wx.ID_ANY,
+            title=_(u"Quad Mesh → NURBS → STEP Export"),
+            size=wx.Size(950, 750),
+            style=wx.DEFAULT_DIALOG_STYLE|wx.RESIZE_BORDER )
+
+        self.SetSizeHints(wx.Size(700, 550))
+        mono = wx.Font(9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+
+        # Split: left = scrollable params, right = log + preview
+        splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE)
+
+        # ── LEFT: scrollable parameters ──
+        scrolled = wx.ScrolledWindow(splitter, style=wx.VSCROLL)
+        scrolled.SetScrollRate(0, 10)
+        szLeft = wx.BoxSizer(wx.VERTICAL)
+
+        # -- CGAL parameters --
+        sbCGAL = wx.StaticBoxSizer(wx.StaticBox(scrolled, wx.ID_ANY, _(u"CGAL Meshing Parameters")), wx.VERTICAL)
+        fgP = wx.FlexGridSizer(0, 2, 6, 12); fgP.AddGrowableCol(1)
+        for lbl, attr, lo, hi, val, inc, tip in [
+            ("Angular criterion (°):",    "m_spinAngular",    1, 90, 30, 1,
+             "Minimum facet angle for CGAL surface meshing"),
+            ("Radius criterion (mm):",    "m_spinRadius",     0.1, 50, 1.0, 0.1,
+             "Maximum surface approximation radius"),
+            ("Distance criterion (mm):",  "m_spinDistance",   0.1, 50, 3.5, 0.1,
+             "Maximum distance from surface"),
+            ("Target faces:",             "m_spinTargetFaces", 1000, 500000, 50000, 5000,
+             "Target number of triangular faces (quad count will differ)"),
+            ("Crease angle (°):",         "m_spinCrease",     1, 90, 25, 1,
+             "Angle threshold for crease detection"),
+            ("Smoothing iterations:",     "m_spinSmooth",     0, 50, 2, 1,
+             "Laplacian smoothing passes"),
+            ("Taubin iterations:",        "m_spinTaubin",     0, 100, 10, 1,
+             "Taubin smoothing iterations (shape preserving)"),
+            ("Weld tolerance (mm):",      "m_spinWeldTol",    0.01, 10, 0.5, 0.05,
+             "Vertex welding tolerance"),
+        ]:
+            fgP.Add(wx.StaticText(sbCGAL.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            s = wx.SpinCtrlDouble(sbCGAL.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+                wx.DefaultPosition, wx.Size(120,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
+            s.SetToolTip(tip)
+            setattr(self, attr, s)
+            fgP.Add(s, 0, wx.EXPAND)
+        sbCGAL.Add(fgP, 0, wx.EXPAND|wx.ALL, 5)
+
+        self.m_chkNoBoundary = wx.CheckBox(sbCGAL.GetStaticBox(), wx.ID_ANY, _(u"Disable boundary surfaces (--no-boundary)"))
+        sbCGAL.Add(self.m_chkNoBoundary, 0, wx.ALL, 5)
+
+        szLeft.Add(sbCGAL, 0, wx.EXPAND|wx.ALL, 10)
+
+        # -- NURBS / STEP parameters (quad_to_nurbs.py) --
+        sbNURBS = wx.StaticBoxSizer(wx.StaticBox(scrolled, wx.ID_ANY, _(u"NURBS → STEP (quad_to_nurbs.py)")), wx.VERTICAL)
+        fgN = wx.FlexGridSizer(0, 2, 6, 12); fgN.AddGrowableCol(1)
+        for lbl, attr, lo, hi, val, inc, tip in [
+            ("Catmull-Clark subdivisions:",  "m_spinSubd",    0, 5, 1, 1,
+             "CC subdivision levels (higher = smoother, slower)"),
+            ("B-spline degree min:",         "m_spinDegMin",  1, 8, 3, 1,
+             "Minimum B-spline surface degree"),
+            ("B-spline degree max:",         "m_spinDegMax",  1, 12, 8, 1,
+             "Maximum B-spline surface degree"),
+            ("Fitting tolerance (mm):",      "m_spinFitTol",  0.0001, 1.0, 0.001, 0.0005,
+             "B-spline fitting tolerance"),
+            ("Sewing tolerance (mm):",       "m_spinSewTol",  0.001, 1.0, 0.05, 0.005,
+             "OCC sewing tolerance for closing seams"),
+            ("Max faces (0=all):",           "m_spinMaxFaces", 0, 500000, 0, 1000,
+             "Process only first N quads (0 = all); useful for testing"),
+        ]:
+            fgN.Add(wx.StaticText(sbNURBS.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            s = wx.SpinCtrlDouble(sbNURBS.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+                wx.DefaultPosition, wx.Size(120,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
+            s.SetToolTip(tip)
+            setattr(self, attr, s)
+            fgN.Add(s, 0, wx.EXPAND)
+        sbNURBS.Add(fgN, 0, wx.EXPAND|wx.ALL, 5)
+
+        # Which sheet to convert
+        szSheet = wx.BoxSizer(wx.HORIZONTAL)
+        szSheet.Add(wx.StaticText(sbNURBS.GetStaticBox(), wx.ID_ANY, _(u"Sheet:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 8)
+        self.m_radioSheet = wx.RadioBox(sbNURBS.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.DefaultSize, ["plus", "minus", "both"], 3, wx.RA_SPECIFY_COLS)
+        self.m_radioSheet.SetSelection(0)
+        szSheet.Add(self.m_radioSheet, 0)
+        sbNURBS.Add(szSheet, 0, wx.ALL, 5)
+
+        szLeft.Add(sbNURBS, 0, wx.EXPAND|wx.ALL, 10)
+
+        # -- Output filename --
+        sbOut = wx.StaticBoxSizer(wx.StaticBox(scrolled, wx.ID_ANY, _(u"Output")), wx.HORIZONTAL)
+        sbOut.Add(wx.StaticText(sbOut.GetStaticBox(), wx.ID_ANY, _(u"Filename:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        self.m_txtOutFile = wx.TextCtrl(sbOut.GetStaticBox(), wx.ID_ANY, u"gyroid_implicit_qf.obj")
+        sbOut.Add(self.m_txtOutFile, 1, wx.EXPAND|wx.ALL, 5)
+        szLeft.Add(sbOut, 0, wx.EXPAND|wx.ALL, 10)
+
+        scrolled.SetSizer(szLeft)
+
+        # ── RIGHT: log + preview ──
+        rightPanel = wx.Panel(splitter)
+        szRight = wx.BoxSizer(wx.VERTICAL)
+
+        # -- Action buttons --
+        szActions = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnRunQuadMesh = wx.Button(rightPanel, wx.ID_ANY, _(u"1. Generate Quad Mesh"))
+        szActions.Add(self.m_btnRunQuadMesh, 0, wx.ALL, 5)
+        self.m_btnConvertNurbs = wx.Button(rightPanel, wx.ID_ANY, _(u"2. Convert to STEP"))
+        self.m_btnConvertNurbs.Enable(False)
+        szActions.Add(self.m_btnConvertNurbs, 0, wx.ALL, 5)
+        self.m_btnStopQuadMesh = wx.Button(rightPanel, wx.ID_ANY, _(u"Stop"))
+        self.m_btnStopQuadMesh.Enable(False)
+        szActions.Add(self.m_btnStopQuadMesh, 0, wx.ALL, 5)
+        szRight.Add(szActions, 0, wx.ALL, 5)
+
+        szActions2 = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnDownloadOBJ = wx.Button(rightPanel, wx.ID_ANY, _(u"Download OBJ"))
+        self.m_btnDownloadOBJ.Enable(False)
+        szActions2.Add(self.m_btnDownloadOBJ, 0, wx.ALL, 5)
+        self.m_btnDownloadSTEP = wx.Button(rightPanel, wx.ID_ANY, _(u"Download STEP"))
+        self.m_btnDownloadSTEP.Enable(False)
+        szActions2.Add(self.m_btnDownloadSTEP, 0, wx.ALL, 5)
+        self.m_btnViewPyVista = wx.Button(rightPanel, wx.ID_ANY, _(u"View in PyVista"))
+        self.m_btnViewPyVista.Enable(False)
+        szActions2.Add(self.m_btnViewPyVista, 0, wx.ALL, 5)
+        szRight.Add(szActions2, 0, wx.ALL, 5)
+
+        # -- Log --
+        self.m_txtQMLog = wx.TextCtrl(rightPanel, wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(-1, 200),
+            wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL)
+        self.m_txtQMLog.SetFont(mono)
+        szRight.Add(self.m_txtQMLog, 1, wx.EXPAND|wx.ALL, 5)
+
+        # -- Status --
+        self.m_statusQM = wx.StaticText(rightPanel, wx.ID_ANY, _(u"Ready"))
+        self.m_statusQM.SetForegroundColour(wx.Colour(120,120,120))
+        szRight.Add(self.m_statusQM, 0, wx.EXPAND|wx.LEFT|wx.RIGHT|wx.BOTTOM, 5)
+
+        # -- Preview --
+        self.m_webviewQMPreview = wx.html2.WebView.New(rightPanel)
+        szRight.Add(self.m_webviewQMPreview, 1, wx.EXPAND|wx.ALL, 5)
+
+        rightPanel.SetSizer(szRight)
+
+        # ── Assemble splitter ──
+        splitter.SplitVertically(scrolled, rightPanel, 380)
+        splitter.SetMinimumPaneSize(250)
+
+        szMain = wx.BoxSizer(wx.VERTICAL)
+        szMain.Add(splitter, 1, wx.EXPAND)
+        self.SetSizer(szMain); self.Layout(); self.Centre(wx.BOTH)
+
+        # ---- Connect Events (virtual) ----
+        self.m_btnRunQuadMesh.Bind(wx.EVT_BUTTON, self.onRunQuadMesh)
+        self.m_btnConvertNurbs.Bind(wx.EVT_BUTTON, self.onConvertNurbs)
+        self.m_btnStopQuadMesh.Bind(wx.EVT_BUTTON, self.onStopQuadMesh)
+        self.m_btnViewPyVista.Bind(wx.EVT_BUTTON, self.onViewPyVista)
+        self.m_btnDownloadOBJ.Bind(wx.EVT_BUTTON, self.onDownloadOBJ)
+        self.m_btnDownloadSTEP.Bind(wx.EVT_BUTTON, self.onDownloadSTEP)
+
+    def get_extra_args(self):
+        """Build the CLI args list for the quad-mesh gRPC call."""
+        args = []
+        args += ["--out", self.m_txtOutFile.GetValue()]
+        args += ["--angular", str(self.m_spinAngular.GetValue())]
+        args += ["--radius", str(self.m_spinRadius.GetValue())]
+        args += ["--distance", str(self.m_spinDistance.GetValue())]
+        args += ["--target-faces", str(int(self.m_spinTargetFaces.GetValue()))]
+        args += ["--crease", str(self.m_spinCrease.GetValue())]
+        args += ["--smooth", str(int(self.m_spinSmooth.GetValue()))]
+        args += ["--taubin-iter", str(int(self.m_spinTaubin.GetValue()))]
+        args += ["--weld-tol", str(self.m_spinWeldTol.GetValue())]
+        if self.m_chkNoBoundary.GetValue():
+            args.append("--no-boundary")
+        return args
+
+    def get_nurbs_args(self):
+        """Build the CLI args list for the quad_to_nurbs.py gRPC call."""
+        args = []
+        args += ["--subd", str(int(self.m_spinSubd.GetValue()))]
+        args += ["--deg-min", str(int(self.m_spinDegMin.GetValue()))]
+        args += ["--deg-max", str(int(self.m_spinDegMax.GetValue()))]
+        args += ["--tol", str(self.m_spinFitTol.GetValue())]
+        args += ["--sew-tol", str(self.m_spinSewTol.GetValue())]
+        mf = int(self.m_spinMaxFaces.GetValue())
+        if mf > 0:
+            args += ["--max-faces", str(mf)]
+        return args
+
+    def get_sheet_selection(self):
+        """Return 'plus', 'minus', or ['plus','minus'] for both."""
+        sel = self.m_radioSheet.GetSelection()
+        if sel == 0: return ["plus"]
+        if sel == 1: return ["minus"]
+        return ["plus", "minus"]
+
+    def __del__( self ): pass
+    def onRunQuadMesh( self, event ): event.Skip()
+    def onConvertNurbs( self, event ): event.Skip()
+    def onStopQuadMesh( self, event ): event.Skip()
+    def onViewPyVista( self, event ): event.Skip()
+    def onDownloadOBJ( self, event ): event.Skip()
+    def onDownloadSTEP( self, event ): event.Skip()
