@@ -48,13 +48,7 @@ dependencies:
   - chex=0.1.88
   - pyamg=5.2.1
   - pypardiso
-  - scikit-image
-  - pythonocc-core
-  - Rtree
-  - trimesh
-  - vispy
-  - pyqt5
-  - triangle
+  
 
 
 
@@ -178,3 +172,10 @@ dependencies:
       - mapbox-earcut
       - PythonSLM
       - pyclipr
+      - scikit-image
+      - pythonocc-core
+      - Rtree
+      - trimesh
+      - vispy
+      - pyqt5
+      - triangle
