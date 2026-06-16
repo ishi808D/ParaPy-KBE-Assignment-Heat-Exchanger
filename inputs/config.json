@@ -10,7 +10,7 @@
       25,
       25
     ],
-    "encap_wall_mm": 3.0
+    "encap_wall_mm": 2.0
   },
   "inlet": {
     "velocity_magnitude": 0.1,

@@ -10,6 +10,7 @@ import json
 import math
 import threading
 import time
+from pathlib import Path
 
 import wx
 
@@ -20,6 +21,10 @@ import sys, os
 _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
+
+# Absolute paths so files land in the repo root regardless of CWD
+_OUT_DIR = Path(_repo_root) / "outputs"
+_IN_DIR  = Path(_repo_root) / "inputs"
 
 import grpc
 import gyroid_service_pb2 as pb2
@@ -80,9 +85,10 @@ class GrpcConnection:
     def stream_output(self):     return self.stub.StreamOutput(pb2.Empty())
     def get_latest(self):        return self.stub.GetLatestMetrics(pb2.Empty())
     def get_history(self):       return self.stub.GetHistory(pb2.Empty())
-    def start_stl(self, a=None): return self.stub.StartStlExport(pb2.StlExportRequest(extra_args=a or []))
-    def get_stl_status(self):    return self.stub.GetStlStatus(pb2.Empty())
-    def download_stl(self, w):   return self.stub.DownloadStl(pb2.StlFileRequest(which=w))
+    def start_stl(self, a=None):   return self.stub.StartStlExport(pb2.StlExportRequest(extra_args=a or []))
+    def get_stl_status(self):      return self.stub.GetStlStatus(pb2.Empty())
+    def stream_stl_output(self):   return self.stub.StreamStlOutput(pb2.Empty())
+    def download_stl(self, w):     return self.stub.DownloadStl(pb2.StlFileRequest(which=w))
 
 # ---------------------------------------------------------------------------
 # Wizard implementation
@@ -101,9 +107,8 @@ class WorkflowWizard(WorkflowWizardFrame):
         self._completed = set()
 
         # Create default input/output folders
-        from pathlib import Path
-        Path("inputs").mkdir(exist_ok=True)
-        Path("outputs").mkdir(exist_ok=True)          # tracks completed workflow steps: {"baseline", "optimize"}
+        _IN_DIR.mkdir(parents=True, exist_ok=True)
+        _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
         self._grpc = GrpcConnection(
             host=getattr(parapy_obj, "grpc_host", "localhost"),
@@ -118,8 +123,19 @@ class WorkflowWizard(WorkflowWizardFrame):
         self._update_nav()
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
+        # Print-time estimation requires a watertight mesh; gyroid sheets are
+        # not watertight so default to skipping it to avoid infinite hangs.
+        self.m_chkPPSkipTime.SetValue(True)
+
     def _on_close(self, evt):
         self._stop.set(); self._grpc.close(); evt.Skip()
+
+    def _safe_status(self, msg):
+        """Update status label — silently ignored if the window has been destroyed."""
+        try:
+            self.m_statusLabel.SetLabel(msg)
+        except RuntimeError:
+            pass
 
     # =================================================================
     # Load state from ParaPy / from server
@@ -543,8 +559,8 @@ class WorkflowWizard(WorkflowWizardFrame):
         p["optimization.am_theta"] = self.m_spinAmTheta.GetValue()
         p["optimization.no_overhang"] = self.m_chkNoOverhang.GetValue()
         p["optimization.kbound"] = self.m_spinKbound.GetValue()
-        p["optimization.wall"] = self.m_spinGyroidWall.GetValue()
-        p["optimization.unit"] = self.m_spinGyroidUnit.GetValue()
+        p["optimization.gyroid_wall"] = self.m_spinGyroidWall.GetValue()
+        p["optimization.gyroid_unit"] = self.m_spinGyroidUnit.GetValue()
         p["optimization.epsilon"] = self.m_spinEpsilon.GetValue()
         p["optimization.spacing"] = self.m_spinSpacing.GetValue()
         p["optimization.bake_spacing"] = self.m_spinBakeSpacing.GetValue()
@@ -651,9 +667,8 @@ class WorkflowWizard(WorkflowWizardFrame):
     def onLoadJSON(self, event):
         """Load configuration from a JSON file (server YAML structure)."""
         import json
-        from pathlib import Path
-        inputs_dir = Path("inputs")
-        inputs_dir.mkdir(exist_ok=True)
+        inputs_dir = _IN_DIR
+        inputs_dir.mkdir(parents=True, exist_ok=True)
         dlg = wx.FileDialog(self, "Load Configuration", str(inputs_dir),
                             wildcard="JSON files (*.json)|*.json",
                             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
@@ -738,9 +753,8 @@ class WorkflowWizard(WorkflowWizardFrame):
     def onSaveJSON(self, event):
         """Save current configuration to inputs/config.json."""
         import json
-        from pathlib import Path
-        inputs_dir = Path("inputs")
-        inputs_dir.mkdir(exist_ok=True)
+        inputs_dir = _IN_DIR
+        inputs_dir.mkdir(parents=True, exist_ok=True)
         path = inputs_dir / "config.json"
         if True:
             cfg = {
@@ -1009,13 +1023,13 @@ class WorkflowWizard(WorkflowWizardFrame):
                 # Log available keys for debugging
                 keys = list(row.values.keys())
                 if keys:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  f"Metrics keys: {', '.join(keys)}")
 
                 # Try to extract values with multiple possible key names
                 for key_attempts, target_list in [
-                    (["dissPower", "Disspower", "dissipation", "objective"], self._opt_objs),
-                    (["meantT", "meanT", "MeanT", "temperature"], self._opt_cstrs),
+                    (["DissPower", "dissPower", "Disspower", "dissipation", "objective"], self._opt_objs),
+                    (["meantT", "meanT", "MeanT", "constraint"], self._opt_cstrs),
                 ]:
                     for k in key_attempts:
                         if k in row.values:
@@ -1034,46 +1048,42 @@ class WorkflowWizard(WorkflowWizardFrame):
     def _fetch_final_results(self, mode, residual_history, outer_iterations, webview):
         """Pull final results — try gRPC first, fall back to parsed data."""
         dissip = 0.0
-        meanT = 0.0
-        got_grpc = False
+        meanT  = 0.0
 
-        # Try gRPC metrics
+        _DISSIP_KEYS = ["DissPower", "dissPower", "Disspower", "dissipation", "objective"]
+        _MEANT_KEYS  = ["meantT", "meanT", "MeanT", "constraint"]
+
+        # ── 1. Try GetLatestMetrics ───────────────────────────────────────────
         try:
             m = self._grpc.get_latest()
             if m.available:
-                row = m.latest
-                keys = list(row.values.keys())
-                wx.CallAfter(self.m_statusLabel.SetLabel,
-                             f"Final metric keys: {keys}")
+                rv = m.latest.values
+                for k in _DISSIP_KEYS:
+                    if k in rv and rv[k] != 0.0:
+                        dissip = rv[k]; break
+                for k in _MEANT_KEYS:
+                    if k in rv and rv[k] != 0.0:
+                        meanT = rv[k]; break
+        except Exception:
+            pass
 
-                for k in ["dissPower", "Disspower", "dissipation"]:
-                    if k in row.values:
-                        dissip = row.values[k]; break
-                for k in ["meantT", "meanT", "MeanT"]:
-                    if k in row.values:
-                        meanT = row.values[k]; break
-                got_grpc = True
-        except Exception as e:
-            wx.CallAfter(self.m_statusLabel.SetLabel, f"Metrics fetch: {e}")
-
-        # Try gRPC history for full convergence
+        # ── 2. Try GetHistory — drives convergence plot AND final values ──────
         try:
             hist = self._grpc.get_history()
             if hist.success and hist.rows:
-                # Log the column names so we know what's available
-                wx.CallAfter(self.m_statusLabel.SetLabel,
-                             f"History columns: {hist.columns}")
+                wx.CallAfter(self._safe_status,
+                             f"History columns: {list(hist.columns)}")
 
                 iters, objs, cstrs = [], [], []
                 for i, row in enumerate(hist.rows):
                     iters.append(i)
                     val = 0.0
-                    for k in ["dissPower", "Disspower", "dissipation", "objective"]:
+                    for k in _DISSIP_KEYS:
                         if k in row.values:
                             val = row.values[k]; break
                     objs.append(val)
                     cval = 0.0
-                    for k in ["meantT", "meanT", "MeanT", "constraint"]:
+                    for k in _MEANT_KEYS:
                         if k in row.values:
                             cval = row.values[k]; break
                     cstrs.append(cval)
@@ -1082,14 +1092,34 @@ class WorkflowWizard(WorkflowWizardFrame):
                 html = _convergence_html(iters, objs, cstrs, "Optimization History")
                 target = self.m_webviewResults if mode == "optimize" else webview
                 wx.CallAfter(target.SetPage, html, "")
-        except Exception as e:
-            wx.CallAfter(self.m_statusLabel.SetLabel, f"History fetch: {e}")
 
-        # Fall back to parsed residual data for the convergence plot
-        if residual_history and not got_grpc:
+                # Use last non-zero history row as the canonical final values
+                for val in reversed(objs):
+                    if val != 0.0:
+                        dissip = val; break
+                for val in reversed(cstrs):
+                    if val != 0.0:
+                        meanT = val; break
+        except Exception as e:
+            wx.CallAfter(self._safe_status, f"History fetch: {e}")
+
+        # ── 3. Fall back to live-parsed outer_iterations ──────────────────────
+        if (dissip == 0.0 or meanT == 0.0) and outer_iterations:
+            last = outer_iterations[-1]
+            if dissip == 0.0:
+                for k in _DISSIP_KEYS:
+                    if k in last and last[k] != 0.0:
+                        dissip = last[k]; break
+            if meanT == 0.0:
+                for k in _MEANT_KEYS:
+                    if k in last and last[k] != 0.0:
+                        meanT = last[k]; break
+
+        # ── 4. Residual convergence plot fallback ─────────────────────────────
+        if residual_history and not self._opt_iters:
             wx.CallAfter(self._update_residual_plot, residual_history, webview)
 
-        # Update result fields
+        # ── 5. Update result fields ───────────────────────────────────────────
         if mode == "baseline":
             wx.CallAfter(self._baseline_done, dissip, meanT)
         else:
@@ -1100,7 +1130,7 @@ class WorkflowWizard(WorkflowWizardFrame):
         self.m_txtBaseDissip.SetLabel(f"{dissip:.2f}" if dissip else "—")
         self.m_txtBaseMeanT.SetLabel(f"{meanT:.2f}" if meanT else "—")
         self.m_btnRunBaseline.Enable(True)
-        self.m_statusLabel.SetLabel("Baseline complete.")
+        self._safe_status("Baseline complete.")
         self._completed.add("baseline")
         self._set_sim_running(False)
         if self.parapy_obj:
@@ -1119,7 +1149,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                 _convergence_html(self._opt_iters, self._opt_objs,
                                   self._opt_cstrs, "Final Convergence"), "")
         self.m_btnStartOpt.Enable(True)
-        self.m_statusLabel.SetLabel("Optimisation complete.")
+        self._safe_status("Optimisation complete.")
         self._completed.add("optimize")
         self._set_sim_running(False)
         if self.parapy_obj:
@@ -1129,7 +1159,7 @@ class WorkflowWizard(WorkflowWizardFrame):
             except Exception: pass
 
     def _worker_error(self, mode, msg):
-        self.m_statusLabel.SetLabel(f"{mode} failed: {msg}")
+        self._safe_status(f"{mode} failed: {msg}")
         self._set_sim_running(False)
         if mode == "baseline":
             self.m_txtBaselineLog.AppendText(f"\n*** ERROR: {msg}\n")
@@ -1152,89 +1182,80 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onExportSTL(self, event):
         """Download existing STL files from the container to outputs/."""
-        from pathlib import Path
-        out_dir = str(Path("outputs"))
-        Path(out_dir).mkdir(exist_ok=True)
+        out_dir = str(_OUT_DIR)
+        _OUT_DIR.mkdir(parents=True, exist_ok=True)
         self.m_btnExportSTL.Enable(False)
         self.m_statusLabel.SetLabel("Downloading STL…")
         threading.Thread(target=self._stl_download_worker,
                          args=(out_dir,), daemon=True).start()
 
     def _stl_download_worker(self, out_dir):
-        from pathlib import Path
         saved = []
 
-        # Try downloading existing files first
+        # ── 1. Start a fresh STL export ──────────────────────────────────────
+        wx.CallAfter(self._safe_status, "Running STL export on server…")
+        try:
+            resp = self._grpc.start_stl()
+            wx.CallAfter(self._safe_status, f"STL export started: {resp.message}")
+            if not resp.success:
+                wx.CallAfter(self._safe_status,
+                             f"STL export failed to start: {resp.message}")
+                wx.CallAfter(self.m_btnExportSTL.Enable, True)
+                return
+        except Exception as e:
+            wx.CallAfter(self._safe_status, f"STL export error: {e}")
+            wx.CallAfter(self.m_btnExportSTL.Enable, True)
+            return
+
+        # ── 2. Stream output until the process finishes ───────────────────────
+        had_error = False
+        try:
+            for line in self._grpc.stream_stl_output():
+                ts = time.strftime("%H:%M:%S",
+                                   time.localtime(line.timestamp_ms / 1000))
+                wx.CallAfter(self._safe_status, f"STL: {line.line[:80]}")
+                if line.line.startswith("ERROR:"):
+                    had_error = True
+        except grpc.RpcError:
+            pass  # stream ended normally
+
+        if had_error:
+            wx.CallAfter(self._safe_status, "STL export failed — see server logs.")
+            wx.CallAfter(self.m_btnExportSTL.Enable, True)
+            return
+
+        # ── 3. Download all generated STL files ───────────────────────────────
+        wx.CallAfter(self._safe_status, "Downloading STL files…")
         for which in ["lattice", "encap", "surface"]:
             try:
                 chunks = self._grpc.download_stl(which)
                 fh, path = None, None
+                last_chunk = None
                 for chunk in chunks:
                     if not path:
-                        path = Path(out_dir) / chunk.filename
+                        fname = chunk.filename if chunk.filename else f"gyroid_{which}.stl"
+                        path = Path(out_dir) / fname
                         fh = open(path, "wb")
                     fh.write(chunk.data)
+                    last_chunk = chunk
                 if fh:
                     fh.close()
                     saved.append(str(path))
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 f"Downloaded: {chunk.filename}")
+                    wx.CallAfter(self._safe_status,
+                                 f"Downloaded: {last_chunk.filename}")
             except grpc.RpcError:
-                pass  # file doesn't exist for this type
-
-        if saved:
-            wx.CallAfter(self.m_btnExportSTL.Enable, True)
-            wx.CallAfter(self.m_btnViewSTL.Enable, True)
-            self._last_stl_paths = saved
-            wx.CallAfter(self.m_statusLabel.SetLabel,
-                         f"Saved {len(saved)} STL file(s) — opening viewer…")
-            wx.CallAfter(self._auto_view_stl)
-            return
-
-        # No files found — need to generate first
-        wx.CallAfter(self.m_statusLabel.SetLabel,
-                     "No STL files found — running gyroid_to_stl.py…")
-        try:
-            resp = self._grpc.start_stl()
-            wx.CallAfter(self.m_statusLabel.SetLabel, f"STL export: {resp.message}")
-
-            # Poll until done
-            while True:
-                time.sleep(2)
-                st = self._grpc.get_stl_status()
-                state = pb2.RunStatusResponse.State.Name(st.state)
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"Generating STL: {state}")
-                if state in ("IDLE", "FINISHED", "CRASHED"):
-                    break
-
-            # Now try downloading again
-            for which in ["lattice", "encap", "surface"]:
-                try:
-                    chunks = self._grpc.download_stl(which)
-                    fh, path = None, None
-                    for chunk in chunks:
-                        if not path:
-                            path = Path(out_dir) / chunk.filename
-                            fh = open(path, "wb")
-                        fh.write(chunk.data)
-                    if fh:
-                        fh.close()
-                        saved.append(str(path))
-                except grpc.RpcError:
-                    pass
-
-            wx.CallAfter(self.m_statusLabel.SetLabel,
-                         f"Saved {len(saved)} STL file(s)")
-            if saved:
-                self._last_stl_paths = saved
-                wx.CallAfter(self.m_btnViewSTL.Enable, True)
-                wx.CallAfter(wx.MessageBox,
-                             "STL files saved:\n" + "\n".join(saved),
-                             "STL Export", wx.OK | wx.ICON_INFORMATION)
-        except Exception as e:
-            wx.CallAfter(self.m_statusLabel.SetLabel, f"STL error: {e}")
+                pass  # this variant doesn't exist — skip silently
 
         wx.CallAfter(self.m_btnExportSTL.Enable, True)
+        if saved:
+            self._last_stl_paths = saved
+            wx.CallAfter(self.m_btnViewSTL.Enable, True)
+            wx.CallAfter(self._safe_status,
+                         f"Saved {len(saved)} STL file(s) — opening viewer…")
+            wx.CallAfter(self._auto_view_stl)
+        else:
+            wx.CallAfter(self._safe_status,
+                         "No STL files downloaded — check server logs.")
 
     def onQuadMeshExport(self, event):
         """Open the Quad Mesh → STEP Export dialog."""
@@ -1321,9 +1342,8 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def _qm_download_obj(self, dlg):
         """Download the OBJ file(s) from the server to outputs/."""
-        from pathlib import Path
-        out_dir = Path("outputs")
-        out_dir.mkdir(exist_ok=True)
+        out_dir = _OUT_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
         sheets = dlg.get_sheet_selection()
         def worker():
             saved = []
@@ -1397,9 +1417,8 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def _qm_download_step(self, dlg):
         """Download the STEP file(s) from the server to outputs/."""
-        from pathlib import Path
-        out_dir = Path("outputs")
-        out_dir.mkdir(exist_ok=True)
+        out_dir = _OUT_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
         sheets = dlg.get_sheet_selection()
         def worker():
             saved = []
@@ -1705,41 +1724,70 @@ class WorkflowWizard(WorkflowWizardFrame):
                         fh.write(chunk.data)
                     if fh:
                         fh.close()
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  f"Case saved: {path}")
                     wx.CallAfter(wx.MessageBox,
                                  f"Full case saved:\n{path}",
                                  "Download", wx.OK | wx.ICON_INFORMATION)
                 except Exception as e:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  f"Download error: {e}")
             threading.Thread(target=worker, daemon=True).start()
         dlg.Destroy()
 
     def onSyncOptimizedField(self, event):
-        """Download the optimised lattice STL from the server and load it into
-        the ParaPy viewport.  Also fetches kx/ky/kz for the export wizard.
+        """Generate a fresh lattice STL on the server from the latest optimisation
+        result, download it, and load it into the ParaPy viewport.
+        Also fetches kx/ky/kz for the export wizard.
         """
         obj = self.parapy_obj
         if not obj:
             self.m_statusLabel.SetLabel("No ParaPy object attached.")
             return
 
-        self.m_statusLabel.SetLabel("Downloading optimised STL from server…")
+        self.m_statusLabel.SetLabel("Generating optimised STL on server…")
 
         def worker():
-            from pathlib import Path
-
-            # ── 1. Download the lattice STL ──────────────────────────────────
-            out_dir = Path("outputs")
+            out_dir = _OUT_DIR
             out_dir.mkdir(parents=True, exist_ok=True)
+
+            # ── 1. Trigger a fresh STL export on the server ──────────────────
+            try:
+                resp = self._grpc.start_stl()
+                wx.CallAfter(self._safe_status,
+                             f"STL export started: {resp.message}")
+                if not resp.success:
+                    wx.CallAfter(self._safe_status,
+                                 f"STL export failed to start: {resp.message}")
+                    return
+            except Exception as e:
+                wx.CallAfter(self._safe_status,
+                             f"STL export trigger failed: {e}")
+                return
+
+            # ── 2. Stream output until the export finishes ───────────────────
+            had_error = False
+            try:
+                for line in self._grpc.stream_stl_output():
+                    wx.CallAfter(self._safe_status, f"STL: {line.line[:80]}")
+                    if line.line.startswith("ERROR:"):
+                        had_error = True
+            except grpc.RpcError:
+                pass  # stream ended normally
+
+            if had_error:
+                wx.CallAfter(self._safe_status,
+                             "STL export failed on server — check logs.")
+                return
+
+            # ── 3. Download the freshly generated lattice STL ────────────────
+            wx.CallAfter(self._safe_status, "Downloading optimised STL…")
             stl_path = None
             try:
                 chunks = self._grpc.download_stl("lattice")
                 fh = None
                 for chunk in chunks:
                     if fh is None:
-                        # use the server-provided filename, saved under outputs/
                         fname = chunk.filename if chunk.filename else "optimized_lattice.stl"
                         stl_path = out_dir / fname
                         fh = open(stl_path, "wb")
@@ -1747,26 +1795,25 @@ class WorkflowWizard(WorkflowWizardFrame):
                 if fh:
                     fh.close()
             except Exception as e:
-                wx.CallAfter(self.m_statusLabel.SetLabel,
-                             f"STL download failed: {e}\n"
-                             "Run STL export on the server first (Step 4).")
+                wx.CallAfter(self._safe_status,
+                             f"STL download failed: {e}")
                 return
 
             if not stl_path or not stl_path.exists():
-                wx.CallAfter(self.m_statusLabel.SetLabel,
-                             "No STL data received — run the STL export step first.")
+                wx.CallAfter(self._safe_status,
+                             "No STL data received from server.")
                 return
 
-            # ── 2. Push path to ParaPy — triggers viewport update ────────────
+            # ── 4. Push path to ParaPy — triggers viewport update ────────────
             abs_path = str(stl_path.resolve())
             try:
                 obj.opt_stl_path = abs_path
             except Exception as e:
-                wx.CallAfter(self.m_statusLabel.SetLabel,
+                wx.CallAfter(self._safe_status,
                              f"ParaPy STL update error: {e}")
                 return
 
-            # ── 3. Also fetch kx/ky/kz for export wizard (best-effort) ───────
+            # ── 5. Also fetch kx/ky/kz for export wizard (best-effort) ───────
             try:
                 import ast
                 import yaml
@@ -1799,7 +1846,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                 pass  # kx/ky/kz sync is best-effort; STL is the primary result
 
             sz_kb = stl_path.stat().st_size / 1024
-            wx.CallAfter(self.m_statusLabel.SetLabel,
+            wx.CallAfter(self._safe_status,
                          f"Optimised STL loaded ({sz_kb:.0f} kB) — "
                          f"check 3D viewport (optimized_lattice_stl Part).")
 
@@ -1848,15 +1895,14 @@ class WorkflowWizard(WorkflowWizardFrame):
                     "Install with: pip install pyslm trimesh",
                     "PySLM", wx.OK|wx.ICON_WARNING)
             except Exception as e:
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"PySLM error: {e}")
+                wx.CallAfter(self._safe_status, f"PySLM error: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_pyslm_report(self, report):
         """Show PySLM results in a dialog and save to outputs/pyslm_report.txt."""
-        from pathlib import Path
-        out_path = Path("outputs") / "pyslm_report.txt"
-        Path("outputs").mkdir(exist_ok=True)
+        out_path = _OUT_DIR / "pyslm_report.txt"
+        _OUT_DIR.mkdir(parents=True, exist_ok=True)
         try:
             out_path.write_text(report, encoding="utf-8")
             self.m_statusLabel.SetLabel(f"PySLM report saved: {out_path}")
@@ -1896,7 +1942,7 @@ class WorkflowWizard(WorkflowWizardFrame):
         self.m_btnDownloadOverhangSTL.Enable(False)
         self.m_btnDownloadSupportsSTL.Enable(False)
         self.m_txtPrintPrepLog.Clear()
-        self.m_statusLabel.SetLabel("Starting print preparation…")
+        wx.CallAfter(self._safe_status, "Starting print preparation…")
 
         def worker():
             try:
@@ -1905,7 +1951,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                 wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
                              f"args: {' '.join(extra_args)}\nStarted: {resp.message}\n")
                 if not resp.success:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  f"Print prep failed: {resp.message}")
                     wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
                     wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
@@ -1914,6 +1960,9 @@ class WorkflowWizard(WorkflowWizardFrame):
                 had_error = False
                 try:
                     for line in stub.StreamPrintPrepOutput(pb2.Empty()):
+                        if self._stop.is_set():
+                            stub.StopPrintPrep(pb2.Empty())
+                            break
                         ts = time.strftime("%H:%M:%S",
                                           time.localtime(line.timestamp_ms / 1000))
                         wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
@@ -1926,17 +1975,17 @@ class WorkflowWizard(WorkflowWizardFrame):
                 wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
                 wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
                 if had_error:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  "Print prep FAILED — see log.")
                 else:
-                    wx.CallAfter(self.m_statusLabel.SetLabel, "Print prep complete.")
+                    wx.CallAfter(self._safe_status, "Print prep complete.")
                     wx.CallAfter(self.m_btnDownloadBuildSTL.Enable, True)
                     wx.CallAfter(self.m_btnDownloadOverhangSTL.Enable, True)
                     wx.CallAfter(self.m_btnDownloadSupportsSTL.Enable, True)
 
             except grpc.RpcError as e:
                 msg = e.details() if hasattr(e, "details") else str(e)
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"Print prep error: {msg}")
+                wx.CallAfter(self._safe_status, f"Print prep error: {msg}")
                 wx.CallAfter(self.m_txtPrintPrepLog.AppendText, f"\nERROR: {e}\n")
                 wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
                 wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
@@ -1954,9 +2003,8 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def _pp_download(self, which: str):
         """Download a print-prep output STL (build/overhang/supports) to outputs/."""
-        from pathlib import Path
-        out_dir = Path("outputs")
-        out_dir.mkdir(exist_ok=True)
+        out_dir = _OUT_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
         self.m_statusLabel.SetLabel(f"Downloading {which} STL…")
 
         def worker():
@@ -1971,15 +2019,15 @@ class WorkflowWizard(WorkflowWizardFrame):
                     fh.write(chunk.data)
                 if fh:
                     fh.close()
-                    wx.CallAfter(self.m_statusLabel.SetLabel, f"Saved: {path}")
+                    wx.CallAfter(self._safe_status, f"Saved: {path}")
                     wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
                                  f"Downloaded {which} → {path}\n")
                 else:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                    wx.CallAfter(self._safe_status,
                                  f"No data received for {which}")
             except grpc.RpcError as e:
                 msg = e.details() if hasattr(e, "details") else str(e)
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"Download error: {msg}")
+                wx.CallAfter(self._safe_status, f"Download error: {msg}")
                 wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
                              f"\nDownload {which} ERROR: {e}\n")
 
@@ -1996,13 +2044,12 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onDownloadHistory(self, event):
         """Download full optimization history and save to outputs/history.tsv."""
-        from pathlib import Path
         try:
             hist = self._grpc.get_history()
             if not hist.success:
                 wx.MessageBox(f"Error: {hist.error}", "History", wx.OK|wx.ICON_ERROR); return
-            Path("outputs").mkdir(exist_ok=True)
-            path = Path("outputs") / "history.tsv"
+            _OUT_DIR.mkdir(parents=True, exist_ok=True)
+            path = _OUT_DIR / "history.tsv"
             with open(path, "w") as f:
                 f.write("\t".join(hist.columns) + "\n")
                 for row in hist.rows:
@@ -2019,3 +2066,77 @@ class WorkflowWizard(WorkflowWizardFrame):
             self.m_statusLabel.SetLabel(f"History saved: {path}")
         except grpc.RpcError as e:
             wx.MessageBox(f"gRPC error: {e.details()}", "History", wx.OK|wx.ICON_ERROR)
+
+    def onGenerateReport(self, event):
+        """Generate a PDF report with geometry images and optimisation history."""
+        self.m_btnGenerateReport.Enable(False)
+        wx.CallAfter(self._safe_status, "Generating PDF report…")
+
+        def worker():
+            try:
+                import sys as _sys
+                _sys.path.insert(0, str(Path(__file__).parent))
+                from reporting import ReportGenerator
+
+                # ── 1. Build design summary from ParaPy object ────────────────
+                obj = self.parapy_obj
+                summary = {}
+                if obj:
+                    try:
+                        summary = obj.design_summary
+                    except Exception:
+                        pass
+
+                # ── 2. Fetch full history from server ─────────────────────────
+                hist_columns = []
+                hist_rows    = []
+                try:
+                    hist = self._grpc.get_history()
+                    if hist.success and hist.rows:
+                        hist_columns = list(hist.columns)
+                        for row in hist.rows:
+                            hist_rows.append({k: v for k, v in row.values.items()})
+                except Exception:
+                    pass  # fall back to wizard's live-parsed lists
+
+                # ── 3. STL paths (use last downloaded set) ────────────────────
+                stl_paths = [p for p in getattr(self, "_last_stl_paths", [])
+                             if Path(p).exists()]
+
+                # ── 4. Build and write the report ─────────────────────────────
+                rg = ReportGenerator(
+                    output_dir=str(_OUT_DIR),
+                    report_name="design_report",
+                    design_summary=summary,
+                    stl_paths=stl_paths,
+                    opt_iters=list(self._opt_iters),
+                    opt_objs=list(self._opt_objs),
+                    opt_cstrs=list(self._opt_cstrs),
+                    history_columns=hist_columns,
+                    history_rows=hist_rows,
+                )
+                pdf_path = rg.generate()
+
+                wx.CallAfter(self._safe_status,
+                             f"Report saved: {pdf_path}")
+                wx.CallAfter(self.m_btnGenerateReport.Enable, True)
+
+                # Open the PDF with the system viewer
+                import subprocess, platform
+                try:
+                    if platform.system() == "Windows":
+                        subprocess.Popen(["start", "", pdf_path], shell=True)
+                    elif platform.system() == "Darwin":
+                        subprocess.Popen(["open", pdf_path])
+                    else:
+                        subprocess.Popen(["xdg-open", pdf_path])
+                except Exception:
+                    pass
+
+            except Exception as e:
+                import traceback
+                wx.CallAfter(self._safe_status, f"Report failed: {e}")
+                wx.CallAfter(self.m_btnGenerateReport.Enable, True)
+                print(traceback.format_exc())
+
+        threading.Thread(target=worker, daemon=True).start()
