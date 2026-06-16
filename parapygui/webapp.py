@@ -7,7 +7,7 @@ Exposes the computational core (gyroid generation, sizing, manufacturability,
 gRPC simulation control) as a REST API consumed by the browser frontend.
 
 Run:
-    uvicorn parapygui.webapp:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn webapp:app --host 0.0.0.0 --port 8000 --reload
 
 Then open http://localhost:8000 in any browser.
 

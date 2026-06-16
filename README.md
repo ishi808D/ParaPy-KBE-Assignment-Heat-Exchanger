@@ -37,9 +37,10 @@ python client.py help
 If the above outputs a list of commands, then the server is set up correctly.
 - Start the ParaPy GUI using:
 ```powershell
-uv run python -m parapygui.main # For normal GUI use
-uv run python -m parapygui.main --config inputs/requirements.json # For json-based use from the CLI
-uv run python -m parapygui.main --no-gui # for running the code in headless mode
+cd parapygui
+uv run python -m main # For normal GUI use
+uv run python -m main --config inputs/requirements.json # For json-based use from the CLI
+uv run python -m main --no-gui # for running the code in headless mode
 ```
 
 ## Working inside the container (for debugging)
