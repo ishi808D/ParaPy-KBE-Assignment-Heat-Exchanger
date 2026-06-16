@@ -135,15 +135,24 @@ class WorkflowWizard(WorkflowWizardFrame):
         # (spinner, parapy_attr, fallback, multiply_for_display)
         pairs = [
             # geometry: m → mm
-            (self.m_spinSizeX,     "enc_length",          0.10,  1000),
-            (self.m_spinSizeY,     "enc_width",           0.05,  1000),
-            (self.m_spinSizeZ,     "enc_height",          0.05,  1000),
-            (self.m_spinEncapWall, "enc_wall_thickness",  0.002, 1000),
+            (self.m_spinSizeX,     "enc_length",          0.25,  1000),
+            (self.m_spinSizeY,     "enc_width",           0.25,  1000),
+            (self.m_spinSizeZ,     "enc_height",          0.30,  1000),
+            (self.m_spinEncapWall, "enc_wall_thickness",  0.003, 1000),
             # port bore sizes: m → mm
             (self.m_spinInWinSX,   "inlet_bore_width",    0.010, 1000),
             (self.m_spinInWinSY,   "inlet_bore_height",   0.015, 1000),
             (self.m_spinOutWinSX,  "outlet_bore_width",   0.010, 1000),
             (self.m_spinOutWinSY,  "outlet_bore_height",  0.015, 1000),
+            # inlet / outlet window origins: m → mm
+            (self.m_spinInWinOX,   "inlet_win_origin_x",  0.010, 1000),
+            (self.m_spinInWinOY,   "inlet_win_origin_y",  0.010, 1000),
+            (self.m_spinOutWinOX,  "outlet_win_origin_x", 0.220, 1000),
+            (self.m_spinOutWinOY,  "outlet_win_origin_y", 0.220, 1000),
+            # mesh resolution (no conversion)
+            (self.m_spinCellsX,    "mesh_cells_x",        75,   1),
+            (self.m_spinCellsY,    "mesh_cells_y",        75,   1),
+            (self.m_spinCellsZ,    "mesh_cells_z",        90,   1),
             # inlet / outlet (no conversion)
             (self.m_spinInletVel,  "inflow_velocity",     2.0,  1),
             (self.m_spinInletTemp, "inflow_temperature",  380,  1),
@@ -168,8 +177,6 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinDissPMax,    "dissPower_max", 2800000, 1),
             (self.m_spinRunMeanTMax, "meantT_max",    303.0,   1),
             (self.m_spinRunDissPMax, "dissPower_max", 9800.0,  1),
-            (self.m_spinWallCells, "opt_wall_cells", 6,      1),
-            (self.m_spinUnitCells, "opt_unit_cells", 75,     1),
             (self.m_spinAmTheta,   "am_theta",       45,     1),
             (self.m_spinMaxIter,   "max_iterations", 100,    1),
             (self.m_spinKbound,       "kbound",         0.08,  1),
@@ -179,10 +186,14 @@ class WorkflowWizard(WorkflowWizardFrame):
         ]
         for spinner, attr, fallback, scale in pairs:
             val = getattr(obj, attr, fallback)
-            spinner.SetValue(float(val) * scale)
+            scaled = float(val) * scale
+            if isinstance(spinner, wx.SpinCtrl):
+                spinner.SetValue(int(round(scaled)))
+            else:
+                spinner.SetValue(scaled)
 
         # cores is a SpinCtrl (int), not SpinCtrlDouble
-        self.m_spinCores.SetValue(8)
+        self.m_spinCores.SetValue(int(getattr(obj, "parallel_cores", 10)))
 
         # no_overhang and opt_mode
         try:
@@ -217,10 +228,10 @@ class WorkflowWizard(WorkflowWizardFrame):
         except Exception:
             self.m_radioMfg.SetSelection(0)
 
-        # kinematic viscosity, density, and c_P come from the fluid Part
+        # kinematic viscosity, density, and c_P come from HeatExchanger inputs
         try:
-            self.m_spinNu.SetValue(obj.fluid.kinematic_viscosity)
-            rho_f = obj.fluid.density
+            self.m_spinNu.SetValue(getattr(obj, "fluid_nu", 1e-6))
+            rho_f = getattr(obj, "fluid_density", 1000.0)
             self.m_spinRhoFluid.SetValue(rho_f)
             self.m_spinCp.SetValue(getattr(obj, "rhoc", 4180.0 * rho_f) / max(rho_f, 1e-9))
         except Exception:
@@ -247,6 +258,13 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinInWinSY,   "inlet_bore_height",  1000),
             (self.m_spinOutWinSX,  "outlet_bore_width",  1000),
             (self.m_spinOutWinSY,  "outlet_bore_height", 1000),
+            (self.m_spinInWinOX,   "inlet_win_origin_x",  1000),
+            (self.m_spinInWinOY,   "inlet_win_origin_y",  1000),
+            (self.m_spinOutWinOX,  "outlet_win_origin_x", 1000),
+            (self.m_spinOutWinOY,  "outlet_win_origin_y", 1000),
+            (self.m_spinCellsX,    "mesh_cells_x",        1),
+            (self.m_spinCellsY,    "mesh_cells_y",        1),
+            (self.m_spinCellsZ,    "mesh_cells_z",        1),
             (self.m_spinInletVel,  "inflow_velocity",    1),
             (self.m_spinInletTemp, "inflow_temperature", 1),
             (self.m_spinOutletP,   "outlet_pressure",    1),
@@ -257,6 +275,8 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinRhoS,      "solid_density_g_per_mm3", 1),
             (self.m_spinDa,        "darcy_number",            1),
             (self.m_spinHconv,       "hconv",        1),
+            (self.m_spinNu,          "fluid_nu",     1),
+            (self.m_spinRhoFluid,    "fluid_density", 1),
             # shape / topology (mm-based)
             (self.m_spinGyroidWall,  "gyroid_wall",  1),
             (self.m_spinGyroidUnit,  "gyroid_unit",  1),
@@ -267,9 +287,7 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinDissPMax,    "dissPower_max", 1),
             (self.m_spinRunMeanTMax, "meantT_max",    1),
             (self.m_spinRunDissPMax, "dissPower_max", 1),
-            (self.m_spinWallCells, "opt_wall_cells", 1),
-            (self.m_spinUnitCells, "opt_unit_cells", 1),
-            (self.m_spinAmTheta,   "am_theta",       1),
+            (self.m_spinAmTheta,   "am_theta",    1),
             (self.m_spinMaxIter,   "max_iterations", 1),
             (self.m_spinKbound,       "kbound",      1),
             (self.m_spinKboundShape,  "kbound",      1),
@@ -663,8 +681,6 @@ class WorkflowWizard(WorkflowWizardFrame):
                     "encap_wall_mm": (self.m_spinEncapWall, 1),
                     "meantT_max": (self.m_spinMeanTMax, 1),
                     "dissPower_max": (self.m_spinDissPMax, 1),
-                    "opt_wall_cells": (self.m_spinWallCells, 1),
-                    "opt_unit_cells": (self.m_spinUnitCells, 1),
                     "am_theta": (self.m_spinAmTheta, 1),
                     "max_iterations": (self.m_spinMaxIter, 1),
                     "kbound":       (self.m_spinKbound,      1),
@@ -746,8 +762,6 @@ class WorkflowWizard(WorkflowWizardFrame):
                 "encap_wall_mm": self.m_spinEncapWall.GetValue(),
                 "meantT_max": self.m_spinRunMeanTMax.GetValue(),
                 "dissPower_max": self.m_spinRunDissPMax.GetValue(),
-                "opt_wall_cells": int(self.m_spinWallCells.GetValue()),
-                "opt_unit_cells": int(self.m_spinUnitCells.GetValue()),
                 "am_theta":     self.m_spinRunAmTheta.GetValue(),
                 "am_L_bridge":  self.m_spinRunAmLBridge.GetValue(),
                 "no_overhang":  not (self.m_radioMfg.GetSelection() == 0),

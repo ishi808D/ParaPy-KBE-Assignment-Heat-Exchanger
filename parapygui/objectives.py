@@ -11,8 +11,8 @@ from parapy.core.validate import Range, OneOf
 
 
 OPTIMISER_MODES = (
-    "minimize_outlet_temperature",
-    "minimize_mechanical_dissipation",
+    "pressure",
+    "heat",
 )
 
 
@@ -22,10 +22,6 @@ class ManufacturingConstraintSet(Base):
     These feed into the manufacturability penalty term in the
     topology optimiser (method from doi:10.1016/j.ijheatmasstransfer.2024.126299).
     """
-
-    #: Minimum feature size the machine can print  [m]
-    min_feature_size: float = Input(
-        2e-4, validator=Range(5e-5, 5e-3))
 
     #: Maximum unsupported overhang angle from vertical  [deg]
     max_overhang_angle: float = Input(
@@ -37,7 +33,6 @@ class ManufacturingConstraintSet(Base):
     @Attribute
     def grpc_patch_dict(self) -> dict:
         return {
-            "optimization.min_wall_thickness": self.min_feature_size,
             "optimization.max_overhang_angle": self.max_overhang_angle,
         }
 
@@ -52,7 +47,7 @@ class Objectives(Base):
 
     #: Optimiser mode — which quantity to minimise
     mode: str = Input(
-        "minimize_outlet_temperature",
+        "pressure",
         validator=OneOf(OPTIMISER_MODES))
 
     #: Target Nusselt number (constraint when minimising dissipation)
@@ -66,9 +61,6 @@ class Objectives(Base):
     @Attribute
     def grpc_patch_dict(self) -> dict:
         return {
-            "optimization.mode":           (
-                "heat" if self.mode == "minimize_outlet_temperature"
-                else "pressure"
-            ),
+            "optimization.mode":           self.mode,
             "optimization.target_nusselt": self.target_nusselt,
         }

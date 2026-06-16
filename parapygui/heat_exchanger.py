@@ -66,36 +66,73 @@ class HeatExchanger(GeomBase):
     # ── file paths ───────────────────────────────────────────────────
 
     json_path: str = Input("inputs/requirements.json")
-    xlsx_path: str = Input("inputs/materials.xlsx")
 
     # ── encapsulation geometry  [m] ──────────────────────────────────
 
-    enc_length:        float = Input(0.10)
-    enc_width:         float = Input(0.05)
-    enc_height:        float = Input(0.05)
-    enc_wall_thickness:float = Input(0.002)
+    enc_length:        float = Input(0.25)
+    enc_width:         float = Input(0.25)
+    enc_height:        float = Input(0.30)
+    enc_wall_thickness:float = Input(0.003)
     inlet_bore_width:  float = Input(0.010)
     inlet_bore_height: float = Input(0.015)
     outlet_bore_width: float = Input(0.010)
-    outlet_bore_height: float = Input(0.015)
+    outlet_bore_height:float = Input(0.015)
     tube_wall:         float = Input(0.001)
     tube_length:       float = Input(0.020)
 
+    # ── inlet / outlet window positions  [m] ─────────────────────────
+
+    inlet_win_origin_x:  float = Input(0.010, label="Inlet window origin X (m)")
+    inlet_win_origin_y:  float = Input(0.010, label="Inlet window origin Y (m)")
+    outlet_win_origin_x: float = Input(0.220, label="Outlet window origin X (m)")
+    outlet_win_origin_y: float = Input(0.220, label="Outlet window origin Y (m)")
+
+    # ── mesh resolution (cells per axis) ─────────────────────────────
+
+    mesh_cells_x: int = Input(75, label="Mesh cells X")
+    mesh_cells_y: int = Input(75, label="Mesh cells Y")
+    mesh_cells_z: int = Input(90, label="Mesh cells Z")
+
     # ── environment ──────────────────────────────────────────────────
 
-    inflow_velocity:       float = Input(1.0)
-    inflow_temperature:    float = Input(350.0)
-    outlet_pressure:       float = Input(101325.0)
-    exterior_temperature:  float = Input(293.15)
-    wall_heat_conduction:  float = Input(10.0)
-    mech_dissipation_lower:float = Input(0.0)
-    mech_dissipation_upper:float = Input(10.0)
+    inflow_velocity:       float = Input(2.0)
+    inflow_temperature:    float = Input(380.0)
+    outlet_pressure:       float = Input(0.0)     # gauge pressure [Pa]
+    exterior_temperature:  float = Input(270.0)
+
+    # ── material properties  (direct inputs for gRPC config & GUI) ───
+
+    qu:                      float = Input(0.005,  label="Shape regularisation weight qa/qk")
+    kf:                      float = Input(0.61,   label="Fluid thermal conductivity (W/m.K)")
+    ks:                      float = Input(237.0,  label="Solid thermal conductivity (W/m.K)")
+    solid_density_g_per_mm3: float = Input(0.0027, label="Solid density (g/mm3)")
+    darcy_number:            float = Input(1e-9,   label="Darcy number")
+    hconv:                   float = Input(1000.0, label="Convective HTC (W/m2.K)")
+    rhoc:                    float = Input(4.18e6, label="rho*cp (J/m3.K)")
+
+    # ── fluid properties (drive FluidElement Part) ───────────────────
+
+    fluid_nu:      float = Input(1e-6,   label="Fluid kinematic viscosity (m2/s)")
+    fluid_density: float = Input(1000.0, label="Fluid density (kg/m3)")
+
+    # ── shape / topology parameters  (mm, stored as-is for server config) ─
+
+    gyroid_wall:  float = Input(0.2,  label="Gyroid wall thickness (mm)")
+    gyroid_unit:  float = Input(1.8,  label="Gyroid unit cell size (mm)")
+    epsilon:      float = Input(0.2,  label="Epsilon smoother (mm)")
+    spacing:      float = Input(7.0,  label="Control point spacing (mm)")
+    bake_spacing: float = Input(1.4,  label="RBF bake resolution (mm)")
 
     # ── lattice ──────────────────────────────────────────────────────
 
     #: Initial uniform wavenumber for the baseline simulation  [rad/m].
     #: 2π/k = unit-cell size, so k=628 → 10 mm cells (≈10 cells per 100 mm box).
-    initial_wavenumber:  float = Input(628.0)
+    #initial_wavenumber:  float = Input(628.0)
+    @Attribute
+    def initial_wavenumber(self) -> float:
+        """Initial uniform wavenumber for the baseline simulation  [rad/m].
+        2π/k = unit-cell size, so k=628 → 10 mm cells (≈10 cells per 100 mm box)."""
+        return 2 * math.pi / (self.gyroid_unit * 1e-3)  # convert mm to m
 
     #: iso-level controlling the gyroid wall thickness / solidity
     iso_level:           float = Input(0.3)
@@ -108,15 +145,8 @@ class HeatExchanger(GeomBase):
 
     # ── objectives ───────────────────────────────────────────────────
 
-    optimizer_mode:     str   = Input("minimize_outlet_temperature")
     target_nusselt:     float = Input(10.0)
     operating_reynolds: float = Input(1000.0)
-
-    # ── manufacturing ────────────────────────────────────────────────
-
-    min_feature_size:   float = Input(2e-4)
-    max_overhang_angle: float = Input(45.0)
-    build_volume:       tuple = Input((0.25, 0.25, 0.30))
 
     # ── gRPC connection ──────────────────────────────────────────────
 
@@ -125,15 +155,25 @@ class HeatExchanger(GeomBase):
 
     # ── server config: optimization  (maps to optimization.* in YAML) ─
 
-    meantT_max:      float = Input(340.0,     label="Mean T constraint (K)")
-    dissPower_max:   float = Input(2800000.0, label="Dissipation constraint (W)")
-    opt_wall_cells:  int   = Input(6,         label="Wall thickness (cells)")
-    opt_unit_cells:  int   = Input(75,        label="Unit cell size (cells)")
-    am_theta:        float = Input(45.0,      label="Overhang angle (deg)")
-    max_iterations:  int   = Input(100,       label="Max iterations")
-    kbound:          float = Input(0.08,      label="kbound")
-    no_overhang:     bool  = Input(False,     label="Enable overhang constraint")
+    meantT_max:    float = Input(303.0,  label="Mean T constraint (K)")
+    dissPower_max: float = Input(9800.0, label="Dissipation constraint (W)")
+    am_theta:      float = Input(45.0,   label="Overhang angle (deg)")
+    max_iterations:  int   = Input(100,    label="Max iterations")
+    kbound:          float = Input(3.4,    label="Wavenumber field max (rad/mm)")
+    no_overhang:     bool  = Input(False,  label="Disable overhang constraint")
     opt_mode:        str   = Input("pressure", label="Opt mode (pressure/heat)")
+
+    # ── run settings ─────────────────────────────────────────────────
+
+    parallel_cores:      int  = Input(10,    label="Parallel MPI cores")
+    optimization_method: str  = Input("MMA", label="Optimisation method")
+    pareto_enabled:      bool = Input(False, label="Pareto sweep enabled")
+
+    # ── manufacturing / AM settings ──────────────────────────────────
+
+    am_L_bridge:            float = Input(1.5,   label="Max AM bridge length (mm)")
+    am_align_build_to_flow: bool  = Input(True,  label="Align build to flow")
+    build_direction:        list  = Input([1.0, 1.0, 1.0], label="Build direction vector")
 
     # ── results (written back by the workflow wizard) ─────────────────
 
@@ -163,7 +203,6 @@ class HeatExchanger(GeomBase):
     def loader(self):
         return Loader(
             json_path=self.json_path,
-            xlsx_path=self.xlsx_path,
         )
 
     @Part
@@ -189,9 +228,8 @@ class HeatExchanger(GeomBase):
             inflow_temperature=self.inflow_temperature,
             outlet_pressure=self.outlet_pressure,
             exterior_temperature=self.exterior_temperature,
-            wall_heat_conduction=self.wall_heat_conduction,
-            mech_dissipation_lower=self.mech_dissipation_lower,
-            mech_dissipation_upper=self.mech_dissipation_upper,
+            wall_heat_conduction=self.hconv,
+            mech_dissipation_upper=self.dissPower_max,
         )
 
     @action(label="Open Workflow Wizard")
@@ -207,7 +245,12 @@ class HeatExchanger(GeomBase):
 
     @Part
     def fluid(self):
-        return FluidElement()
+        return FluidElement(
+            kinematic_viscosity=self.fluid_nu,
+            conductivity=self.kf,
+            density=self.fluid_density,
+            specific_heat=self.rhoc / max(self.fluid_density, 1e-9),
+        )
 
     @Part
     def lattice(self):
@@ -219,7 +262,7 @@ class HeatExchanger(GeomBase):
     @Part
     def objectives(self):
         return Objectives(
-            mode=self.optimizer_mode,
+            mode=self.opt_mode,
             target_nusselt=self.target_nusselt,
             operating_reynolds=self.operating_reynolds,
         )
@@ -227,9 +270,8 @@ class HeatExchanger(GeomBase):
     @Part
     def manufacturing(self):
         return ManufacturingConstraintSet(
-            min_feature_size=self.min_feature_size,
-            max_overhang_angle=self.max_overhang_angle,
-            build_volume=self.build_volume,
+            max_overhang_angle=self.am_theta,
+            build_volume=(self.enc_length, self.enc_width, self.enc_height),
         )
 
     @Part
@@ -304,8 +346,8 @@ class HeatExchanger(GeomBase):
             face_areas=self.gyroid_preview.face_areas,
             solidity=self.gyroid_preview.solidity,
             unit_cell_size=self.lattice.frequency_field.mean_unit_cell_size,
-            max_overhang_angle=self.max_overhang_angle,
-            min_feature_size=self.min_feature_size,
+            max_overhang_angle=self.am_theta,
+            min_feature_size=self.gyroid_wall / 1000,
         )
 
     @Part
@@ -313,7 +355,7 @@ class HeatExchanger(GeomBase):
         """Final DfAM analysis on the exported STL (optional dependency)."""
         return PySLMAnalysis(
             stl_path="outputs/heat_exchanger_lattice.stl",
-            max_overhang_angle=self.max_overhang_angle,
+            max_overhang_angle=self.am_theta,
         )
 
     @Part
@@ -435,36 +477,74 @@ class HeatExchanger(GeomBase):
         """
         cfg: dict = {}
 
-        # geometry
-        cfg["geometry.length"] = self.enc_length
-        cfg["geometry.width"] = self.enc_width
-        cfg["geometry.height"] = self.enc_height
-        cfg["geometry.wall_thickness"] = self.enc_wall_thickness
+        # geometry (server expects size_mm list and encap_wall_mm)
+        cfg["geometry.size_mm"] = [
+            self.enc_length * 1000,
+            self.enc_width  * 1000,
+            self.enc_height * 1000,
+        ]
+        cfg["geometry.cells"]       = [self.mesh_cells_x, self.mesh_cells_y, self.mesh_cells_z]
+        cfg["geometry.encap_wall_mm"] = self.enc_wall_thickness * 1000
 
         # inlet
         cfg["inlet.velocity_magnitude"] = self.inflow_velocity
-        cfg["inlet.temperature"] = self.inflow_temperature
+        cfg["inlet.temperature"]         = self.inflow_temperature
+        cfg["inlet.window_origin_mm"]    = [
+            self.inlet_win_origin_x * 1000,
+            self.inlet_win_origin_y * 1000,
+        ]
+        cfg["inlet.window_size_mm"] = [
+            self.inlet_bore_width  * 1000,
+            self.inlet_bore_height * 1000,
+        ]
 
         # outlet
-        cfg["outlet.pressure"] = self.outlet_pressure
+        cfg["outlet.pressure"]          = self.outlet_pressure
+        cfg["outlet.window_origin_mm"]  = [
+            self.outlet_win_origin_x * 1000,
+            self.outlet_win_origin_y * 1000,
+        ]
+        cfg["outlet.window_size_mm"] = [
+            self.outlet_bore_width  * 1000,
+            self.outlet_bore_height * 1000,
+        ]
 
         # material / thermal
-        cfg["material.Texterior"] = self.exterior_temperature
-        cfg["material.nu"] = self.fluid.kinematic_viscosity
-        cfg["thermal.initial_temperature"] = self.exterior_temperature
+        cfg["material.Texterior"]              = self.exterior_temperature
+        cfg["material.nu"]                     = self.fluid.kinematic_viscosity
+        cfg["material.rho_fluid"]              = self.fluid.density
+        cfg["material.qu"]                     = self.qu
+        cfg["material.kf"]                     = self.kf
+        cfg["material.ks"]                     = self.ks
+        cfg["material.rhoc"]                   = self.rhoc
+        cfg["material.solid_density_g_per_mm3"]= self.solid_density_g_per_mm3
+        cfg["material.darcy_number"]           = self.darcy_number
+        cfg["material.hconv"]                  = self.hconv
+        cfg["thermal.initial_temperature"]     = self.exterior_temperature
 
         # optimization
-        cfg["optimization.mode"] = self.opt_mode
-        cfg["optimization.meantT_max"] = self.meantT_max
-        cfg["optimization.dissPower_max"] = self.dissPower_max
-        cfg["optimization.wall"] = self.opt_wall_cells
-        cfg["optimization.unit"] = self.opt_unit_cells
-        cfg["optimization.am_theta"] = self.am_theta
-        cfg["optimization.no_overhang"] = self.no_overhang
-        cfg["optimization.kbound"] = self.kbound
+        cfg["optimization.mode"]         = self.opt_mode
+        cfg["optimization.meantT_max"]   = self.meantT_max
+        cfg["optimization.dissPower_max"]= self.dissPower_max
+        cfg["optimization.min_wall_thickness"] = self.gyroid_wall / 1000
+        cfg["optimization.wall"]         = self.gyroid_wall
+        cfg["optimization.unit"]         = self.gyroid_unit
+        cfg["optimization.epsilon"]      = self.epsilon
+        cfg["optimization.spacing"]      = self.spacing
+        cfg["optimization.bake_spacing"] = self.bake_spacing
+        cfg["optimization.kbound"]       = self.kbound
+        cfg["optimization.am_theta"]     = self.am_theta
+        cfg["optimization.am_L_bridge"]  = self.am_L_bridge
+        cfg["optimization.no_overhang"]  = self.no_overhang
+        cfg["optimization.am_align_build_to_flow"] = self.am_align_build_to_flow
+        if not self.am_align_build_to_flow:
+            cfg["optimization.build_direction"] = self.build_direction
+        cfg["optimization.method"]       = self.optimization_method
+        cfg["optimization.pareto_enabled"] = self.pareto_enabled
 
         # run
-        cfg["run.iters"] = self.max_iterations
+        cfg["run.iters"]    = self.max_iterations
+        cfg["run.parallel"] = self.parallel_cores
 
         # also include sub-part patches if they provide them
         for part_name in ("environment", "lattice", "objectives", "manufacturing"):
@@ -591,6 +671,16 @@ class HeatExchanger(GeomBase):
         return max(0.05, min(0.95, (target_Nu / base - 1.0) / 2.5))
 
     @Attribute
+    def enclosed_volume(self):
+        """Interior volume of the enclosure (m³)."""
+        return self.encapsulation.interior_volume
+    
+    @Attribute
+    def enclosed_gyroid_surface_area(self):
+        """Surface area of the gyroid within the enclosure (m²)."""
+        return self.gyroid_preview.surface_area
+
+    @Attribute
     def nusselt_number(self):
         """Nusselt number from semi-empirical correlation."""
         return 0.023 * self.reynolds_number**0.8 * self.fluid.prandtl_number**0.4 * (1 + 2.5 * self.solidity)
@@ -608,3 +698,4 @@ class HeatExchanger(GeomBase):
         rho = self.fluid.density
         U = self.inflow_velocity
         return self.friction_factor * (L / D_h) * 0.5 * rho * U**2 if D_h > 0 else 0.0
+    

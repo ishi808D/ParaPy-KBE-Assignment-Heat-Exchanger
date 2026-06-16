@@ -5,7 +5,10 @@ Thermophysical properties of the coolant fluid.
 
 Maps to UML class: **FluidElement**
 
-Defaults are dry air at 20 °C / 1 atm (the MTC electronic-cooling baseline).
+Defaults match liquid water at ~20 °C (the primary coolant in the heat
+exchanger application).  All values are driven from HeatExchanger inputs so
+that the GUI and the server config stay consistent; the defaults here are
+only used when this class is instantiated stand-alone (e.g. in unit tests).
 """
 
 from parapy.core import Base, Input, Attribute
@@ -15,28 +18,28 @@ from parapy.core.validate import Range
 class FluidElement(Base):
     """Coolant fluid properties.  All SI units."""
 
-    #: Dynamic viscosity  [Pa·s]
-    dynamic_viscosity: float = Input(
-        1.81e-5, validator=Range(1e-7, 1e-1))
+    #: Kinematic viscosity  [m²/s]
+    kinematic_viscosity: float = Input(
+        1e-6, validator=Range(1e-8, 1e-2))
 
     #: Thermal conductivity  [W/(m·K)]
     conductivity: float = Input(
-        0.0257, validator=Range(1e-4, 1e3))
+        0.61, validator=Range(1e-4, 1e3))
 
     #: Density  [kg/m³]
     density: float = Input(
-        1.204, validator=Range(1e-3, 2e4))
+        1000.0, validator=Range(1e-3, 2e4))
 
     #: Isobaric specific heat capacity  [J/(kg·K)]
     specific_heat: float = Input(
-        1005.0, validator=Range(1.0, 1e5))
+        4180.0, validator=Range(1.0, 1e5))
 
     # ── derived ──────────────────────────────────────────────────────
 
     @Attribute
-    def kinematic_viscosity(self) -> float:
-        """ν = μ / ρ   [m²/s]"""
-        return self.dynamic_viscosity / self.density
+    def dynamic_viscosity(self) -> float:
+        """μ = ν · ρ   [Pa·s]"""
+        return self.kinematic_viscosity * self.density
 
     @Attribute
     def prandtl_number(self) -> float:

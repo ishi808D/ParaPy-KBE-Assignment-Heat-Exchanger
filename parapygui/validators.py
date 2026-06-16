@@ -90,11 +90,11 @@ def validate_heat_exchanger(he) -> list[str]:
         (check_temperatures,
          (env.inflow_temperature, env.exterior_temperature)),
         (check_dissipation_bounds,
-         (env.mech_dissipation_lower, env.mech_dissipation_upper)),
+         (0, env.mech_dissipation_upper)),
         (check_build_volume,
          (enc.length, enc.width, enc.height, mfg.build_volume)),
         (check_wall_vs_feature,
-         (enc.wall_thickness, mfg.min_feature_size)),
+         (enc.wall_thickness, he.gyroid_wall / 1000)),
     ]
     for fn, args in checks:
         try:
