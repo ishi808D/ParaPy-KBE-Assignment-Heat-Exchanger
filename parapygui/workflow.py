@@ -144,16 +144,33 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinInletTemp, "inflow_temperature",  380,  1),
             (self.m_spinOutletP,   "outlet_pressure",     0.0,  1),
             # material / thermal
-            (self.m_spinTexterior, "exterior_temperature", 270, 1),
-            (self.m_spinTinitial,  "exterior_temperature", 270, 1),
+            (self.m_spinTexterior, "exterior_temperature",       270,    1),
+            (self.m_spinTinitial,  "exterior_temperature",       270,    1),
+            (self.m_spinQu,        "qu",                         0.005,  1),
+            (self.m_spinKf,        "kf",                         0.61,   1),
+            (self.m_spinKs,        "ks",                         237.0,  1),
+            (self.m_spinRhoS,      "solid_density_g_per_mm3",    0.0027, 1),
+            (self.m_spinDa,        "darcy_number",               1e-9,   1),
+            (self.m_spinHconv,       "hconv",        1000.0, 1),
+            # shape / topology (mm-based)
+            (self.m_spinGyroidWall,  "gyroid_wall",  0.2,  1),
+            (self.m_spinGyroidUnit,  "gyroid_unit",  1.8,  1),
+            (self.m_spinEpsilon,     "epsilon",      0.2,  1),
+            (self.m_spinSpacing,     "spacing",      7.0,  1),
+            (self.m_spinBakeSpacing, "bake_spacing", 1.4,  1),
             # optimization params
-            (self.m_spinMeanTMax,  "meantT_max",    340,     1),
-            (self.m_spinDissPMax,  "dissPower_max", 2800000, 1),
+            (self.m_spinMeanTMax,    "meantT_max",    340,     1),
+            (self.m_spinDissPMax,    "dissPower_max", 2800000, 1),
+            (self.m_spinRunMeanTMax, "meantT_max",    303.0,   1),
+            (self.m_spinRunDissPMax, "dissPower_max", 9800.0,  1),
             (self.m_spinWallCells, "opt_wall_cells", 6,      1),
             (self.m_spinUnitCells, "opt_unit_cells", 75,     1),
             (self.m_spinAmTheta,   "am_theta",       45,     1),
             (self.m_spinMaxIter,   "max_iterations", 100,    1),
-            (self.m_spinKbound,    "kbound",         0.08,   1),
+            (self.m_spinKbound,       "kbound",         0.08,  1),
+            (self.m_spinKboundShape,  "kbound",         3.4,   1),
+            (self.m_spinRunAmTheta,   "am_theta",       45.0,  1),
+            (self.m_spinRunAmLBridge, "am_L_bridge",    1.5,   1),
         ]
         for spinner, attr, fallback, scale in pairs:
             val = getattr(obj, attr, fallback)
@@ -165,13 +182,43 @@ class WorkflowWizard(WorkflowWizardFrame):
         except Exception:
             self.m_spinCores.SetValue(10)
 
-        # kinematic viscosity and density come from the fluid Part
+        # optimization method choice
+        try:
+            _method = getattr(obj, "optimization_method", "MMA")
+            _pareto = getattr(obj, "pareto_enabled", False)
+            _om = ["MMA", "L-BFGS-B", "trust-constr"]
+            self.m_choiceOptMethod.SetSelection(3 if _pareto else (_om.index(_method) if _method in _om else 0))
+        except Exception:
+            self.m_choiceOptMethod.SetSelection(0)
+
+        # manufacturability radio state
+        try:
+            _mfg_on = not getattr(obj, "no_overhang", False)
+            self.m_radioMfg.SetSelection(0 if _mfg_on else 1)
+            self.m_panelMfgDetails.Show(_mfg_on)
+            if _mfg_on:
+                _aligned = getattr(obj, "am_align_build_to_flow", True)
+                self.m_radioAlignFlow.SetSelection(0 if _aligned else 1)
+                self.m_panelBuildDir.Show(not _aligned)
+                if not _aligned:
+                    _bd = getattr(obj, "build_direction", [1.0, 1.0, 1.0])
+                    if isinstance(_bd, (list, tuple)) and len(_bd) >= 3:
+                        self.m_spinBuildDirX.SetValue(float(_bd[0]))
+                        self.m_spinBuildDirY.SetValue(float(_bd[1]))
+                        self.m_spinBuildDirZ.SetValue(float(_bd[2]))
+        except Exception:
+            self.m_radioMfg.SetSelection(0)
+
+        # kinematic viscosity, density, and c_P come from the fluid Part
         try:
             self.m_spinNu.SetValue(obj.fluid.kinematic_viscosity)
-            self.m_spinRhoFluid.SetValue(obj.fluid.density)
+            rho_f = obj.fluid.density
+            self.m_spinRhoFluid.SetValue(rho_f)
+            self.m_spinCp.SetValue(getattr(obj, "rhoc", 4180.0 * rho_f) / max(rho_f, 1e-9))
         except Exception:
             self.m_spinNu.SetValue(1e-6)
             self.m_spinRhoFluid.SetValue(1000.0)
+            self.m_spinCp.SetValue(4180.0)
 
     def _write_gui_to_parapy(self):
         """Push GUI spinner values back to ParaPy @Inputs.
@@ -189,20 +236,60 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinInletVel,  "inflow_velocity",    1),
             (self.m_spinInletTemp, "inflow_temperature", 1),
             (self.m_spinOutletP,   "outlet_pressure",    1),
-            (self.m_spinTexterior, "exterior_temperature", 1),
-            (self.m_spinMeanTMax,  "meantT_max",    1),
-            (self.m_spinDissPMax,  "dissPower_max", 1),
+            (self.m_spinTexterior, "exterior_temperature",    1),
+            (self.m_spinQu,        "qu",                      1),
+            (self.m_spinKf,        "kf",                      1),
+            (self.m_spinKs,        "ks",                      1),
+            (self.m_spinRhoS,      "solid_density_g_per_mm3", 1),
+            (self.m_spinDa,        "darcy_number",            1),
+            (self.m_spinHconv,       "hconv",        1),
+            # shape / topology (mm-based)
+            (self.m_spinGyroidWall,  "gyroid_wall",  1),
+            (self.m_spinGyroidUnit,  "gyroid_unit",  1),
+            (self.m_spinEpsilon,     "epsilon",      1),
+            (self.m_spinSpacing,     "spacing",      1),
+            (self.m_spinBakeSpacing, "bake_spacing", 1),
+            (self.m_spinMeanTMax,    "meantT_max",    1),
+            (self.m_spinDissPMax,    "dissPower_max", 1),
+            (self.m_spinRunMeanTMax, "meantT_max",    1),
+            (self.m_spinRunDissPMax, "dissPower_max", 1),
             (self.m_spinWallCells, "opt_wall_cells", 1),
             (self.m_spinUnitCells, "opt_unit_cells", 1),
             (self.m_spinAmTheta,   "am_theta",       1),
             (self.m_spinMaxIter,   "max_iterations", 1),
-            (self.m_spinKbound,    "kbound",         1),
+            (self.m_spinKbound,       "kbound",      1),
+            (self.m_spinKboundShape,  "kbound",      1),
+            (self.m_spinRunAmTheta,   "am_theta",    1),
+            (self.m_spinRunAmLBridge, "am_L_bridge", 1),
         ]
         for spinner, attr, scale in pairs:
             try: setattr(obj, attr, spinner.GetValue() / scale)
             except Exception: pass
+        # mfg radio state
+        _mfg_on = (self.m_radioMfg.GetSelection() == 0)
+        try: setattr(obj, "no_overhang", not _mfg_on)
+        except Exception: pass
+        if _mfg_on:
+            _aligned = (self.m_radioAlignFlow.GetSelection() == 0)
+            try: setattr(obj, "am_align_build_to_flow", _aligned)
+            except Exception: pass
+            if not _aligned:
+                try: setattr(obj, "build_direction", [
+                    self.m_spinBuildDirX.GetValue(),
+                    self.m_spinBuildDirY.GetValue(),
+                    self.m_spinBuildDirZ.GetValue()])
+                except Exception: pass
+        # rhoc is derived: c_P × rho_fluid
+        try: setattr(obj, "rhoc", self.m_spinCp.GetValue() * self.m_spinRhoFluid.GetValue())
+        except Exception: pass
         # cores
         try: setattr(obj, "parallel_cores", self.m_spinCores.GetValue())
+        except Exception: pass
+        # optimization method
+        _om_label = ["MMA", "L-BFGS-B", "trust-constr", "pareto"][max(self.m_choiceOptMethod.GetSelection(), 0)]
+        try: setattr(obj, "optimization_method", "MMA" if _om_label == "pareto" else _om_label)
+        except Exception: pass
+        try: setattr(obj, "pareto_enabled", _om_label == "pareto")
         except Exception: pass
 
     def _update_parapy_geometry(self):
@@ -261,8 +348,17 @@ class WorkflowWizard(WorkflowWizardFrame):
                 self.m_spinOutletP.SetValue(cfg.get("outlet", {}).get("pressure", 0.0))
                 self.m_spinTexterior.SetValue(cfg.get("material", {}).get("Texterior", 270.0))
                 self.m_spinTinitial.SetValue(cfg.get("thermal", {}).get("initial_temperature", 270.0))
+                self.m_spinQu.SetValue(cfg.get("material", {}).get("qu", 0.005))
                 self.m_spinNu.SetValue(cfg.get("material", {}).get("nu", 1e-6))
-                self.m_spinRhoFluid.SetValue(cfg.get("material", {}).get("rho_fluid", 1000.0))
+                _mat = cfg.get("material", {})
+                rho_f = _mat.get("rho_fluid", 1000.0)
+                self.m_spinRhoFluid.SetValue(rho_f)
+                self.m_spinKf.SetValue(_mat.get("kf", 0.61))
+                self.m_spinKs.SetValue(_mat.get("ks", 237.0))
+                self.m_spinCp.SetValue(_mat.get("rhoc", 4180.0 * rho_f) / max(rho_f, 1e-9))
+                self.m_spinRhoS.SetValue(_mat.get("solid_density_g_per_mm3", 0.0027))
+                self.m_spinDa.SetValue(_mat.get("darcy_number", 1e-9))
+                self.m_spinHconv.SetValue(_mat.get("hconv", 1000.0))
                 self.m_spinEncapWall.SetValue(cfg.get("geometry", {}).get("encap_wall_mm", 3.0))
                 opt = cfg.get("optimization", {})
                 self.m_spinMeanTMax.SetValue(opt.get("meantT_max", 340))
@@ -271,10 +367,39 @@ class WorkflowWizard(WorkflowWizardFrame):
                 self.m_spinUnitCells.SetValue(opt.get("unit", 75))
                 self.m_spinAmTheta.SetValue(opt.get("am_theta", 45))
                 self.m_spinKbound.SetValue(opt.get("kbound", 0.08))
+                self.m_spinGyroidWall.SetValue(opt.get("gyroid_wall", 0.2))
+                self.m_spinGyroidUnit.SetValue(opt.get("gyroid_unit", 1.8))
+                self.m_spinEpsilon.SetValue(opt.get("epsilon", 0.2))
+                self.m_spinSpacing.SetValue(opt.get("spacing", 7.0))
+                self.m_spinBakeSpacing.SetValue(opt.get("bake_spacing", 1.4))
                 self.m_spinMaxIter.SetValue(cfg.get("run", {}).get("iters", 100))
                 mode = opt.get("mode", "pressure")
                 self.m_radioMode.SetSelection(0 if mode == "pressure" else 1)
+                _run_sel = 0 if mode == "pressure" else 1
+                self.m_choiceMode.SetSelection(_run_sel)
+                self.m_panelMeanT.Show(_run_sel == 0)
+                self.m_panelDissPMax.Show(_run_sel == 1)
+                self.m_spinRunMeanTMax.SetValue(opt.get("meantT_max", 303.0))
+                self.m_spinRunDissPMax.SetValue(opt.get("dissPower_max", 9800.0))
+                self.m_spinKboundShape.SetValue(opt.get("kbound", 3.4))
+                _mfg_on = not opt.get("no_overhang", False)
+                self.m_radioMfg.SetSelection(0 if _mfg_on else 1)
+                self.m_panelMfgDetails.Show(_mfg_on)
+                self.m_spinRunAmTheta.SetValue(opt.get("am_theta", 45.0))
+                self.m_spinRunAmLBridge.SetValue(opt.get("am_L_bridge", 1.5))
+                _aligned = opt.get("am_align_build_to_flow", True)
+                self.m_radioAlignFlow.SetSelection(0 if _aligned else 1)
+                _bd = opt.get("build_direction", [1.0, 1.0, 1.0])
+                self.m_panelBuildDir.Show(not _aligned)
+                if isinstance(_bd, list) and len(_bd) >= 3:
+                    self.m_spinBuildDirX.SetValue(float(_bd[0]))
+                    self.m_spinBuildDirY.SetValue(float(_bd[1]))
+                    self.m_spinBuildDirZ.SetValue(float(_bd[2]))
                 self.m_chkNoOverhang.SetValue(opt.get("no_overhang", False))
+                _method = opt.get("method", "MMA")
+                _pareto = opt.get("pareto_enabled", False)
+                _om = ["MMA", "L-BFGS-B", "trust-constr"]
+                self.m_choiceOptMethod.SetSelection(3 if _pareto else (_om.index(_method) if _method in _om else 0))
                 # inlet/outlet windows
                 iwo = cfg.get("inlet", {}).get("window_origin_mm", [10, 10])
                 iws = cfg.get("inlet", {}).get("window_size_mm", [10, 15])
@@ -361,8 +486,15 @@ class WorkflowWizard(WorkflowWizardFrame):
 
         # ── Material / thermal ──
         p["material.Texterior"] = self.m_spinTexterior.GetValue()
+        p["material.qu"] = self.m_spinQu.GetValue()
         p["material.nu"] = self.m_spinNu.GetValue()
         p["material.rho_fluid"] = self.m_spinRhoFluid.GetValue()
+        p["material.kf"] = self.m_spinKf.GetValue()
+        p["material.ks"] = self.m_spinKs.GetValue()
+        p["material.rhoc"] = self.m_spinCp.GetValue() * self.m_spinRhoFluid.GetValue()
+        p["material.solid_density_g_per_mm3"] = self.m_spinRhoS.GetValue()
+        p["material.darcy_number"] = self.m_spinDa.GetValue()
+        p["material.hconv"] = self.m_spinHconv.GetValue()
         p["thermal.initial_temperature"] = self.m_spinTinitial.GetValue()
 
         # ── Optimization ──
@@ -375,6 +507,39 @@ class WorkflowWizard(WorkflowWizardFrame):
         p["optimization.am_theta"] = self.m_spinAmTheta.GetValue()
         p["optimization.no_overhang"] = self.m_chkNoOverhang.GetValue()
         p["optimization.kbound"] = self.m_spinKbound.GetValue()
+        p["optimization.wall"] = self.m_spinGyroidWall.GetValue()
+        p["optimization.unit"] = self.m_spinGyroidUnit.GetValue()
+        p["optimization.epsilon"] = self.m_spinEpsilon.GetValue()
+        p["optimization.spacing"] = self.m_spinSpacing.GetValue()
+        p["optimization.bake_spacing"] = self.m_spinBakeSpacing.GetValue()
+        _om_label = ["MMA", "L-BFGS-B", "trust-constr", "pareto"][max(self.m_choiceOptMethod.GetSelection(), 0)]
+        p["optimization.method"] = "MMA" if _om_label == "pareto" else _om_label
+        p["optimization.pareto_enabled"] = (_om_label == "pareto")
+
+        # ── Run Settings mode (page-0 controls override page-3 values) ──
+        _mode_run = ["pressure", "heat"][max(self.m_choiceMode.GetCurrentSelection(), 0)]
+        p["optimization.mode"] = _mode_run
+        if _mode_run == "pressure":
+            p["optimization.meantT_max"] = self.m_spinRunMeanTMax.GetValue()
+        else:
+            p["optimization.dissPower_max"] = self.m_spinRunDissPMax.GetValue()
+
+        # ── Shape kbound override ──
+        p["optimization.kbound"] = self.m_spinKboundShape.GetValue()
+
+        # ── Manufacturability (page-0 mfg controls override page-3 values) ──
+        _mfg_on = (self.m_radioMfg.GetSelection() == 0)
+        p["optimization.no_overhang"] = not _mfg_on
+        if _mfg_on:
+            p["optimization.am_theta"] = self.m_spinRunAmTheta.GetValue()
+            p["optimization.am_L_bridge"] = self.m_spinRunAmLBridge.GetValue()
+            _aligned = (self.m_radioAlignFlow.GetSelection() == 0)
+            p["optimization.am_align_build_to_flow"] = _aligned
+            if not _aligned:
+                p["optimization.build_direction"] = [
+                    self.m_spinBuildDirX.GetValue(),
+                    self.m_spinBuildDirY.GetValue(),
+                    self.m_spinBuildDirZ.GetValue()]
 
         # ── Run control ──
         p["run.iters"] = int(self.m_spinMaxIter.GetValue())
@@ -470,6 +635,13 @@ class WorkflowWizard(WorkflowWizardFrame):
                     "outlet_pressure": (self.m_spinOutletP, 1),
                     "exterior_temperature": (self.m_spinTexterior, 1),
                     "initial_temperature": (self.m_spinTinitial, 1),
+                    "qu":           (self.m_spinQu,     1),
+                    "kf":           (self.m_spinKf,     1),
+                    "ks":           (self.m_spinKs,     1),
+                    "c_p":          (self.m_spinCp,     1),
+                    "rho_s":        (self.m_spinRhoS,   1),
+                    "darcy_number": (self.m_spinDa,     1),
+                    "hconv":        (self.m_spinHconv,  1),
                     "encap_wall_mm": (self.m_spinEncapWall, 1),
                     "meantT_max": (self.m_spinMeanTMax, 1),
                     "dissPower_max": (self.m_spinDissPMax, 1),
@@ -477,7 +649,12 @@ class WorkflowWizard(WorkflowWizardFrame):
                     "opt_unit_cells": (self.m_spinUnitCells, 1),
                     "am_theta": (self.m_spinAmTheta, 1),
                     "max_iterations": (self.m_spinMaxIter, 1),
-                    "kbound": (self.m_spinKbound, 1),
+                    "kbound":       (self.m_spinKbound,      1),
+                    "gyroid_wall":  (self.m_spinGyroidWall,  1),
+                    "gyroid_unit":  (self.m_spinGyroidUnit,  1),
+                    "epsilon":      (self.m_spinEpsilon,     1),
+                    "spacing":      (self.m_spinSpacing,     1),
+                    "bake_spacing": (self.m_spinBakeSpacing, 1),
                 }
                 for key, (spinner, _) in spinner_map.items():
                     if key in cfg:
@@ -487,6 +664,38 @@ class WorkflowWizard(WorkflowWizardFrame):
                 if "opt_mode" in cfg:
                     self.m_radioMode.SetSelection(
                         0 if cfg["opt_mode"] == "pressure" else 1)
+                    _run_sel = 0 if cfg["opt_mode"] == "pressure" else 1
+                    self.m_choiceMode.SetSelection(_run_sel)
+                    self.m_panelMeanT.Show(_run_sel == 0)
+                    self.m_panelDissPMax.Show(_run_sel == 1)
+                if "meantT_max" in cfg:
+                    self.m_spinRunMeanTMax.SetValue(float(cfg["meantT_max"]))
+                if "dissPower_max" in cfg:
+                    self.m_spinRunDissPMax.SetValue(float(cfg["dissPower_max"]))
+                if "kbound" in cfg:
+                    self.m_spinKboundShape.SetValue(float(cfg["kbound"]))
+                if "am_theta" in cfg:
+                    self.m_spinRunAmTheta.SetValue(float(cfg["am_theta"]))
+                if "am_L_bridge" in cfg:
+                    self.m_spinRunAmLBridge.SetValue(float(cfg["am_L_bridge"]))
+                if "no_overhang" in cfg:
+                    _mfg_flat = not bool(cfg["no_overhang"])
+                    self.m_radioMfg.SetSelection(0 if _mfg_flat else 1)
+                    self.m_panelMfgDetails.Show(_mfg_flat)
+                if "am_align_build_to_flow" in cfg:
+                    _aligned_flat = bool(cfg["am_align_build_to_flow"])
+                    self.m_radioAlignFlow.SetSelection(0 if _aligned_flat else 1)
+                    self.m_panelBuildDir.Show(not _aligned_flat)
+                if "build_direction" in cfg:
+                    _bd = cfg["build_direction"]
+                    if isinstance(_bd, list) and len(_bd) >= 3:
+                        self.m_spinBuildDirX.SetValue(float(_bd[0]))
+                        self.m_spinBuildDirY.SetValue(float(_bd[1]))
+                        self.m_spinBuildDirZ.SetValue(float(_bd[2]))
+                if "opt_method" in cfg:
+                    _method = cfg["opt_method"]
+                    _om = ["MMA", "L-BFGS-B", "trust-constr"]
+                    self.m_choiceOptMethod.SetSelection(3 if _method == "pareto" else (_om.index(_method) if _method in _om else 0))
                 self.m_statusLabel.SetLabel(f"Loaded: {dlg.GetPath()}")
             except Exception as e:
                 wx.MessageBox(f"Failed to load:\n{e}", "Error", wx.OK|wx.ICON_ERROR)
@@ -511,17 +720,36 @@ class WorkflowWizard(WorkflowWizardFrame):
                 "inlet_temperature": self.m_spinInletTemp.GetValue(),
                 "outlet_pressure": self.m_spinOutletP.GetValue(),
                 "exterior_temperature": self.m_spinTexterior.GetValue(),
-                "initial_temperature": self.m_spinTinitial.GetValue(),
+                "initial_temperature":  self.m_spinTinitial.GetValue(),
+                "qu":           self.m_spinQu.GetValue(),
+                "kf":           self.m_spinKf.GetValue(),
+                "ks":           self.m_spinKs.GetValue(),
+                "c_p":          self.m_spinCp.GetValue(),
+                "rho_s":        self.m_spinRhoS.GetValue(),
+                "darcy_number": self.m_spinDa.GetValue(),
+                "hconv":        self.m_spinHconv.GetValue(),
                 "encap_wall_mm": self.m_spinEncapWall.GetValue(),
-                "meantT_max": self.m_spinMeanTMax.GetValue(),
-                "dissPower_max": self.m_spinDissPMax.GetValue(),
+                "meantT_max": self.m_spinRunMeanTMax.GetValue(),
+                "dissPower_max": self.m_spinRunDissPMax.GetValue(),
                 "opt_wall_cells": int(self.m_spinWallCells.GetValue()),
                 "opt_unit_cells": int(self.m_spinUnitCells.GetValue()),
-                "am_theta": self.m_spinAmTheta.GetValue(),
+                "am_theta":     self.m_spinRunAmTheta.GetValue(),
+                "am_L_bridge":  self.m_spinRunAmLBridge.GetValue(),
+                "no_overhang":  not (self.m_radioMfg.GetSelection() == 0),
+                "am_align_build_to_flow": self.m_radioAlignFlow.GetSelection() == 0,
+                "build_direction": [self.m_spinBuildDirX.GetValue(),
+                                    self.m_spinBuildDirY.GetValue(),
+                                    self.m_spinBuildDirZ.GetValue()],
                 "max_iterations": int(self.m_spinMaxIter.GetValue()),
                 "parallel_cores": self.m_spinCores.GetValue(),
-                "kbound": self.m_spinKbound.GetValue(),
-                "opt_mode": "pressure" if self.m_radioMode.GetSelection() == 0 else "heat",
+                "kbound":       self.m_spinKboundShape.GetValue(),
+                "gyroid_wall":  self.m_spinGyroidWall.GetValue(),
+                "gyroid_unit":  self.m_spinGyroidUnit.GetValue(),
+                "epsilon":      self.m_spinEpsilon.GetValue(),
+                "spacing":      self.m_spinSpacing.GetValue(),
+                "bake_spacing": self.m_spinBakeSpacing.GetValue(),
+                "opt_mode": ["pressure", "heat"][max(self.m_choiceMode.GetCurrentSelection(), 0)],
+                "opt_method": ["MMA", "L-BFGS-B", "trust-constr", "pareto"][max(self.m_choiceOptMethod.GetSelection(), 0)],
             }
             try:
                 with open(dlg.GetPath(), "w") as f:
