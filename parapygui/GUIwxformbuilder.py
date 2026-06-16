@@ -21,12 +21,12 @@ class WorkflowWizardFrame ( wx.Frame ):
 
     NUM_PAGES = 7
     PAGE_TITLES = [
-        u"Step 1: Geometry & Boundary Conditions",
+        u"Step 1: Geometry && Boundary Conditions",
         u"Step 2: Semi-Empirical Sizing",
         u"Step 3: Baseline Simulation",
         u"Step 4: Optimizer Setup",
         u"Step 5: Optimization Monitor",
-        u"Step 6: Results & Post-Processing",
+        u"Step 6: Results && Post-Processing",
         u"Step 7: Print Preparation (PySLM)",
     ]
 
@@ -79,11 +79,22 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbCells.Add(self.m_lblTotalCells, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         szG.Add(sbCells, 0, wx.EXPAND|wx.ALL, 5)
 
-        # -- encapsulation --
-        sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Encapsulation")), wx.HORIZONTAL)
-        sbEnc.Add(wx.StaticText(sbEnc.GetStaticBox(), wx.ID_ANY, _(u"Wall thickness (mm):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_spinEncapWall = wx.SpinCtrlDouble(sbEnc.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.5, 20, 3.0, 0.5)
-        sbEnc.Add(self.m_spinEncapWall, 0, wx.ALL, 4)
+        # -- Shape settings --
+        sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Shape settings")), wx.VERTICAL)
+        fgEnc = wx.FlexGridSizer(0, 4, 5, 10); fgEnc.AddGrowableCol(1); fgEnc.AddGrowableCol(3)
+        for lbl, attr, lo, hi, val, inc in [
+            ("Encapsulation wall (mm):", "m_spinEncapWall",   0.5,  20,   3.0, 0.5),
+            ("Gyroid wall (mm):",        "m_spinGyroidWall",  0.01, 10,   0.2, 0.01),
+            ("Gyroid unit cell (mm):",   "m_spinGyroidUnit",  0.1,  50,   1.8, 0.1),
+            (u"ε smoother (mm):",        "m_spinEpsilon",     0.01, 10,   0.2, 0.01),
+            ("Ctrl pt spacing (mm):",    "m_spinSpacing",     0.1,  100,  7.0, 0.1),
+            ("RBF resolution (mm):",     "m_spinBakeSpacing", 0.1,  50,   1.4, 0.1),
+            ("Wavenumber field max (rad/mm):", "m_spinKboundShape", 0.001, 100, 3.4, 0.1),
+        ]:
+            fgEnc.Add(wx.StaticText(sbEnc.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            s = wx.SpinCtrlDouble(sbEnc.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
+            setattr(self, attr, s); fgEnc.Add(s, 0, wx.EXPAND)
+        sbEnc.Add(fgEnc, 0, wx.EXPAND|wx.ALL, 5)
         szG.Add(sbEnc, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- inlet --
@@ -120,37 +131,134 @@ class WorkflowWizardFrame ( wx.Frame ):
         szG.Add(sbOut, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- material / thermal --
-        sbMat = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Material & Thermal")), wx.VERTICAL)
+        sbMat = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Material && Thermal")), wx.VERTICAL)
         fgMat = wx.FlexGridSizer(0, 4, 5, 10); fgMat.AddGrowableCol(1); fgMat.AddGrowableCol(3)
         for lbl, attr, lo, hi, val, inc in [
-            ("Exterior temp (K):",    "m_spinTexterior",   100, 2000, 270.0, 5),
-            ("Initial temp (K):",     "m_spinTinitial",    100, 2000, 270.0, 5),
-            ("Kinematic visc (m²/s):", "m_spinNu",         1e-8, 1e-3, 1e-6, 1e-7),
-            ("Fluid density (kg/m³):", "m_spinRhoFluid",   0.1, 10000, 1000.0, 10),
+            ("Exterior temp (K):",          "m_spinTexterior", 100,    2000,   270.0,   5),
+            (u"qα / qₖ (shape):",           "m_spinQu",        0.0001, 1.0,    0.005,   0.001),
+            (u"Kinematic visc (m²/s):",     "m_spinNu",        1e-8,   1e-3,   1e-6,    1e-7),
+            (u"Fluid density (kg/m³):",     "m_spinRhoFluid",  0.1,    10000,  1000.0,  10),
+            (u"k_f (W/m·K):",              "m_spinKf",        0.001,  1000,   0.61,    0.01),
+            (u"k_s (W/m·K):",              "m_spinKs",        0.001,  10000,  237.0,   1.0),
+            (u"cₚ (J/kg·K):",              "m_spinCp",        1,      100000, 4180.0,  10.0),
+            (u"ρ_s (g/mm³):",              "m_spinRhoS",      1e-5,   0.1,    0.0027,  0.0001),
+            ("Da (Darcy number):",          "m_spinDa",        0,      1e-3,   1e-9,    1e-10),
+            (u"h (W/m²·K):",               "m_spinHconv",     0.1,    100000, 1000.0,  10.0),
         ]:
             fgMat.Add(wx.StaticText(sbMat.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
             s = wx.SpinCtrlDouble(sbMat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(110,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
             setattr(self, attr, s); fgMat.Add(s, 0, wx.EXPAND)
+        self.m_spinRhoS.SetDigits(6)
+        self.m_spinDa.SetDigits(12)
         sbMat.Add(fgMat, 0, wx.EXPAND|wx.ALL, 5)
+        # m_spinTinitial is not shown; it always mirrors m_spinTexterior
+        self.m_spinTinitial = wx.SpinCtrlDouble(sbMat.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(110,-1), wx.SP_ARROW_KEYS, 100, 2000, 270.0, 5)
+        self.m_spinTinitial.Hide()
+        def _sync_tinitial(evt):
+            self.m_spinTinitial.SetValue(self.m_spinTexterior.GetValue())
+            evt.Skip()
+        self.m_spinTexterior.Bind(wx.EVT_SPINCTRLDOUBLE, _sync_tinitial)
+        self.m_spinTexterior.Bind(wx.EVT_TEXT, _sync_tinitial)
         szG.Add(sbMat, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- run settings (applies to all simulations) --
         sbRun = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Run Settings")), wx.VERTICAL)
-        szRunRow = wx.BoxSizer(wx.HORIZONTAL)
-        szRunRow.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"8", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 8)
-        szRunRow.Add(self.m_spinCores, 0, wx.ALL, 4)
-        szRunRow.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        # row 1: cores / iterations / opt-method
+        szRunRow1 = wx.BoxSizer(wx.HORIZONTAL)
+        szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"10", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 10)
+        szRunRow1.Add(self.m_spinCores, 0, wx.ALL, 4)
+        szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinMaxIter = wx.SpinCtrlDouble(sbRun.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 5000, 100, 10)
-        szRunRow.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
-        sbRun.Add(szRunRow, 0, wx.ALL, 4)
-        self.m_radioMode = wx.RadioBox(sbRun.GetStaticBox(), wx.ID_ANY,
-            _(u"Optimization mode"), wx.DefaultPosition, wx.DefaultSize,
-            [_(u"pressure  (min dissipation, temp ≤ meantT_max)"),
-             _(u"heat  (min mean temp, dissipation ≤ dissPower_max)")],
-            1, wx.RA_SPECIFY_COLS)
-        self.m_radioMode.SetSelection(0)
-        sbRun.Add(self.m_radioMode, 0, wx.EXPAND|wx.ALL, 5)
+        szRunRow1.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
+        szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Opt. method:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_choiceOptMethod = wx.Choice(sbRun.GetStaticBox(), wx.ID_ANY,
+            choices=[u"MMA", u"L-BFGS-B", u"trust-constr", u"pareto"])
+        self.m_choiceOptMethod.SetSelection(0)
+        szRunRow1.Add(self.m_choiceOptMethod, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
+        sbRun.Add(szRunRow1, 0, wx.EXPAND)
+        # row 2: mode dropdown + conditional parameter panels
+        szRunRow2 = wx.BoxSizer(wx.HORIZONTAL)
+        szRunRow2.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Mode:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_choiceMode = wx.Choice(sbRun.GetStaticBox(), wx.ID_ANY, choices=[u"pressure", u"heat"])
+        self.m_choiceMode.SetSelection(0)
+        szRunRow2.Add(self.m_choiceMode, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
+        # pressure panel: max average temperature
+        self.m_panelMeanT = wx.Panel(sbRun.GetStaticBox(), wx.ID_ANY)
+        _szMeanT = wx.BoxSizer(wx.HORIZONTAL)
+        _szMeanT.Add(wx.StaticText(self.m_panelMeanT, wx.ID_ANY, _(u"Max avg temp (K):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinRunMeanTMax = wx.SpinCtrlDouble(self.m_panelMeanT, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 2000, 303.0, 1.0)
+        _szMeanT.Add(self.m_spinRunMeanTMax, 0, wx.ALL, 4)
+        self.m_panelMeanT.SetSizer(_szMeanT)
+        szRunRow2.Add(self.m_panelMeanT, 0, wx.ALIGN_CENTER_VERTICAL)
+        # heat panel: max dissipative power
+        self.m_panelDissPMax = wx.Panel(sbRun.GetStaticBox(), wx.ID_ANY)
+        _szDissPMax = wx.BoxSizer(wx.HORIZONTAL)
+        _szDissPMax.Add(wx.StaticText(self.m_panelDissPMax, wx.ID_ANY, _(u"Max diss. power (W):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinRunDissPMax = wx.SpinCtrlDouble(self.m_panelDissPMax, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(100,-1), wx.SP_ARROW_KEYS, 0, 1e8, 9800.0, 100.0)
+        _szDissPMax.Add(self.m_spinRunDissPMax, 0, wx.ALL, 4)
+        self.m_panelDissPMax.SetSizer(_szDissPMax)
+        self.m_panelDissPMax.Hide()
+        szRunRow2.Add(self.m_panelDissPMax, 0, wx.ALIGN_CENTER_VERTICAL)
+        sbRun.Add(szRunRow2, 0, wx.EXPAND|wx.TOP, 4)
+        def _on_run_mode(evt):
+            sel = self.m_choiceMode.GetCurrentSelection()
+            self.m_panelMeanT.Show(sel == 0)
+            self.m_panelDissPMax.Show(sel == 1)
+            self.m_panelGeom.Layout()
+            evt.Skip()
+        self.m_choiceMode.Bind(wx.EVT_CHOICE, _on_run_mode)
+        # row 3: manufacturability analysis
+        szRunRow3 = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_radioMfg = wx.RadioBox(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Manufacturability Analysis"),
+            choices=[u"On", u"Off"], majorDimension=1, style=wx.RA_SPECIFY_ROWS)
+        self.m_radioMfg.SetSelection(0)
+        szRunRow3.Add(self.m_radioMfg, 0, wx.ALL|wx.ALIGN_TOP, 4)
+        # conditional panel shown when mfg is On
+        self.m_panelMfgDetails = wx.Panel(sbRun.GetStaticBox(), wx.ID_ANY)
+        _szMfg = wx.BoxSizer(wx.VERTICAL)
+        _fgMfg = wx.FlexGridSizer(0, 4, 5, 10)
+        _fgMfg.AddGrowableCol(1); _fgMfg.AddGrowableCol(3)
+        _fgMfg.Add(wx.StaticText(self.m_panelMfgDetails, wx.ID_ANY, _(u"Max overhang angle (°):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinRunAmTheta = wx.SpinCtrlDouble(self.m_panelMfgDetails, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0, 90, 45.0, 1.0)
+        _fgMfg.Add(self.m_spinRunAmTheta, 0, wx.EXPAND)
+        _fgMfg.Add(wx.StaticText(self.m_panelMfgDetails, wx.ID_ANY, _(u"Max bridging length (mm):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinRunAmLBridge = wx.SpinCtrlDouble(self.m_panelMfgDetails, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.01, 500, 1.5, 0.1)
+        _fgMfg.Add(self.m_spinRunAmLBridge, 0, wx.EXPAND)
+        _szMfg.Add(_fgMfg, 0, wx.EXPAND|wx.ALL, 4)
+        self.m_radioAlignFlow = wx.RadioBox(self.m_panelMfgDetails, wx.ID_ANY, _(u"Align print to flow?"),
+            choices=[u"Yes", u"No"], majorDimension=1, style=wx.RA_SPECIFY_ROWS)
+        self.m_radioAlignFlow.SetSelection(0)
+        _szMfg.Add(self.m_radioAlignFlow, 0, wx.ALL, 4)
+        # build direction panel (visible when align=No)
+        self.m_panelBuildDir = wx.Panel(self.m_panelMfgDetails, wx.ID_ANY)
+        _szBD = wx.BoxSizer(wx.HORIZONTAL)
+        _szBD.Add(wx.StaticText(self.m_panelBuildDir, wx.ID_ANY, _(u"Build direction X:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinBuildDirX = wx.SpinCtrlDouble(self.m_panelBuildDir, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, -1000, 1000, 1.0, 0.1)
+        _szBD.Add(self.m_spinBuildDirX, 0, wx.ALL, 2)
+        _szBD.Add(wx.StaticText(self.m_panelBuildDir, wx.ID_ANY, _(u"Y:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 4)
+        self.m_spinBuildDirY = wx.SpinCtrlDouble(self.m_panelBuildDir, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, -1000, 1000, 1.0, 0.1)
+        _szBD.Add(self.m_spinBuildDirY, 0, wx.ALL, 2)
+        _szBD.Add(wx.StaticText(self.m_panelBuildDir, wx.ID_ANY, _(u"Z:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 4)
+        self.m_spinBuildDirZ = wx.SpinCtrlDouble(self.m_panelBuildDir, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, -1000, 1000, 1.0, 0.1)
+        _szBD.Add(self.m_spinBuildDirZ, 0, wx.ALL, 2)
+        self.m_panelBuildDir.SetSizer(_szBD)
+        self.m_panelBuildDir.Hide()
+        _szMfg.Add(self.m_panelBuildDir, 0, wx.EXPAND|wx.TOP, 2)
+        self.m_panelMfgDetails.SetSizer(_szMfg)
+        szRunRow3.Add(self.m_panelMfgDetails, 1, wx.ALIGN_TOP)
+        sbRun.Add(szRunRow3, 0, wx.EXPAND|wx.TOP, 4)
+        def _on_align_flow(evt):
+            self.m_panelBuildDir.Show(self.m_radioAlignFlow.GetSelection() != 0)
+            self.m_panelGeom.Layout()
+            evt.Skip()
+        self.m_radioAlignFlow.Bind(wx.EVT_RADIOBOX, _on_align_flow)
+        def _on_mfg(evt):
+            self.m_panelMfgDetails.Show(self.m_radioMfg.GetSelection() == 0)
+            self.m_panelGeom.Layout()
+            evt.Skip()
+        self.m_radioMfg.Bind(wx.EVT_RADIOBOX, _on_mfg)
         szG.Add(sbRun, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- file operations --
@@ -225,7 +333,15 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_panelOpt = wx.Panel(self.m_simplebook)
         szOpt = wx.BoxSizer(wx.VERTICAL)
 
-        sbCstr = wx.StaticBoxSizer(wx.StaticBox(self.m_panelOpt, wx.ID_ANY, _(u"Constraints & Optimization")), wx.VERTICAL)
+        self.m_radioMode = wx.RadioBox(self.m_panelOpt, wx.ID_ANY,
+            _(u"optimization.mode"), wx.DefaultPosition, wx.DefaultSize,
+            [_(u"pressure  (min dissipation, temp ≤ meantT_max)"),
+             _(u"heat  (min mean temp, dissipation ≤ dissPower_max)")],
+            1, wx.RA_SPECIFY_COLS)
+        self.m_radioMode.SetSelection(0)
+        szOpt.Add(self.m_radioMode, 0, wx.EXPAND|wx.ALL, 10)
+
+        sbCstr = wx.StaticBoxSizer(wx.StaticBox(self.m_panelOpt, wx.ID_ANY, _(u"Constraints && Optimization")), wx.VERTICAL)
         fgC = wx.FlexGridSizer(0, 2, 6, 10); fgC.AddGrowableCol(1)
         for lbl, attr, lo, hi, val, inc in [
             ("meantT_max (K):",        "m_spinMeanTMax",   200, 2000, 340, 5),
@@ -280,7 +396,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbFin.Add(fgF, 0, wx.EXPAND|wx.ALL, 5)
         szRes.Add(sbFin, 0, wx.EXPAND|wx.ALL, 10)
         szBtns = wx.BoxSizer(wx.HORIZONTAL)
-        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export & Download STL"))
+        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export && Download STL"))
         szBtns.Add(self.m_btnExportSTL, 0, wx.ALL, 5)
         self.m_btnViewSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"View STL (PyVista)"))
         self.m_btnViewSTL.Enable(False)
