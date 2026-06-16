@@ -23,6 +23,7 @@ dependencies = [
     "uvicorn[standard]",
     "scikit-image",
     "openpyxl",
+    "pyvista",
     "python-multipart",
     # GUI toolkit alternative (kept alongside wxpython)
     "pyqt6",

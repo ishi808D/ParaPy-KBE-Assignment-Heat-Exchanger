@@ -65,6 +65,18 @@ class WorkflowWizardFrame ( wx.Frame ):
             setattr(self, attr, s); sbDom.Add(s, 0, wx.ALL, 4)
         szG.Add(sbDom, 0, wx.EXPAND|wx.ALL, 5)
 
+        # -- mesh cells (geometry.cells) --
+        sbCells = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Mesh Resolution (cells)")), wx.HORIZONTAL)
+        for lbl, attr, val in [("X:", "m_spinCellsX", 75), ("Y:", "m_spinCellsY", 75), ("Z:", "m_spinCellsZ", 90)]:
+            sbCells.Add(wx.StaticText(sbCells.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+            s = wx.SpinCtrl(sbCells.GetStaticBox(), wx.ID_ANY, str(val), wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 5, 500, val)
+            setattr(self, attr, s); sbCells.Add(s, 0, wx.ALL, 4)
+        # total cell count display
+        self.m_lblTotalCells = wx.StaticText(sbCells.GetStaticBox(), wx.ID_ANY, _(u"  = 506,250 cells"))
+        self.m_lblTotalCells.SetForegroundColour(wx.Colour(120, 120, 120))
+        sbCells.Add(self.m_lblTotalCells, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        szG.Add(sbCells, 0, wx.EXPAND|wx.ALL, 5)
+
         # -- encapsulation --
         sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Encapsulation")), wx.HORIZONTAL)
         sbEnc.Add(wx.StaticText(sbEnc.GetStaticBox(), wx.ID_ANY, _(u"Wall thickness (mm):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
@@ -315,6 +327,9 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnApplyGeom.Bind(wx.EVT_BUTTON, self.onApplyGeom)
         self.m_btnLoadJSON.Bind(wx.EVT_BUTTON, self.onLoadJSON)
         self.m_btnSaveJSON.Bind(wx.EVT_BUTTON, self.onSaveJSON)
+        self.m_spinCellsX.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
+        self.m_spinCellsY.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
+        self.m_spinCellsZ.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
         self.m_btnApplyOpt.Bind(wx.EVT_BUTTON, self.onApplyOpt)
         self.m_btnRunBaseline.Bind(wx.EVT_BUTTON, self.onRunBaseline)
         self.m_btnStartOpt.Bind(wx.EVT_BUTTON, self.onStartOpt)
@@ -333,6 +348,7 @@ class WorkflowWizardFrame ( wx.Frame ):
     def onApplyGeom( self, event ): event.Skip()
     def onLoadJSON( self, event ): event.Skip()
     def onSaveJSON( self, event ): event.Skip()
+    def onCellsChanged( self, event ): event.Skip()
     def onApplyOpt( self, event ): event.Skip()
     def onRunBaseline( self, event ): event.Skip()
     def onStartOpt( self, event ): event.Skip()
@@ -383,8 +399,8 @@ class QuadMeshExportDialog ( wx.Dialog ):
              "Target number of triangular faces (quad count will differ)"),
             ("Crease angle (°):",         "m_spinCrease",     1, 90, 25, 1,
              "Angle threshold for crease detection"),
-            ("Smoothing iterations:",     "m_spinSmooth",     0, 50, 2, 1,
-             "Laplacian smoothing passes"),
+            ("Smoothing iterations:",     "m_spinSmooth",     0, 50, 0, 1,
+             "Instant Meshes smoothing passes (-S flag); 0 avoids a known crash on complex meshes"),
             ("Taubin iterations:",        "m_spinTaubin",     0, 100, 10, 1,
              "Taubin smoothing iterations (shape preserving)"),
             ("Weld tolerance (mm):",      "m_spinWeldTol",    0.01, 10, 0.5, 0.05,

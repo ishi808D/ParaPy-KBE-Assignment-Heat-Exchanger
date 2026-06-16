@@ -205,6 +205,45 @@ class WorkflowWizard(WorkflowWizardFrame):
         try: setattr(obj, "parallel_cores", self.m_spinCores.GetValue())
         except Exception: pass
 
+    def _update_parapy_geometry(self):
+        """Force ParaPy to recompute geometry after wizard values change.
+        Writing to @Input attributes triggers ParaPy's dependency tracking,
+        which automatically invalidates and recomputes dependent @Attributes
+        and @Parts (including the encapsulation geometry in the 3D viewport).
+        """
+        obj = self.parapy_obj
+        if not obj:
+            return
+
+        # Write geometry dimensions (mm → m conversion)
+        try:
+            obj.enc_length = self.m_spinSizeX.GetValue() / 1000
+            obj.enc_width = self.m_spinSizeY.GetValue() / 1000
+            obj.enc_height = self.m_spinSizeZ.GetValue() / 1000
+            obj.enc_wall_thickness = self.m_spinEncapWall.GetValue() / 1000
+        except Exception as e:
+            print(f"[workflow] geometry update: {e}")
+
+        # Write optimization results if available
+        for attr, val in [
+            ("baseline_dissipation", getattr(self, "_final_dissip", 0)),
+            ("baseline_mean_temp", getattr(self, "_final_meanT", 0)),
+        ]:
+            try:
+                setattr(obj, attr, val)
+            except Exception:
+                pass
+
+        self.m_statusLabel.SetLabel("ParaPy model updated — check 3D viewport.")
+
+    def onCellsChanged(self, event):
+        """Update the total cell count label when any cell spinner changes."""
+        cx = self.m_spinCellsX.GetValue()
+        cy = self.m_spinCellsY.GetValue()
+        cz = self.m_spinCellsZ.GetValue()
+        total = cx * cy * cz
+        self.m_lblTotalCells.SetLabel(f"  = {total:,} cells")
+
     def _try_load_from_server(self):
         """Try to pull the current config from the running container
         and populate spinners (useful if container already has a config)."""
@@ -290,6 +329,11 @@ class WorkflowWizard(WorkflowWizardFrame):
 
         # ── Geometry (regenerates blockMeshDict) ──
         p["geometry.size_mm"] = [size_x, size_y, size_z]
+        p["geometry.cells"] = [
+            self.m_spinCellsX.GetValue(),
+            self.m_spinCellsY.GetValue(),
+            self.m_spinCellsZ.GetValue(),
+        ]
         p["geometry.encap_wall_mm"] = self.m_spinEncapWall.GetValue()
 
         # ── Inlet (windows must fit inside geometry.size_mm) ──
@@ -378,7 +422,11 @@ class WorkflowWizard(WorkflowWizardFrame):
         if self._sim_running:
             return
         if self._page == self.NUM_PAGES - 1:
-            self.Close(); return
+            # Finish — write everything back to ParaPy to update geometry
+            self._write_gui_to_parapy()
+            self._update_parapy_geometry()
+            self.Close()
+            return
         if self._page == 0:
             self._write_gui_to_parapy()
             self._compute_sizing()
@@ -974,25 +1022,32 @@ class WorkflowWizard(WorkflowWizardFrame):
                     wx.CallAfter(dlg.m_btnStopQuadMesh.Enable, False)
                     return
 
-                # Stream output
+                # Stream output — track any ERROR lines
+                had_error = False
                 try:
                     for line in stub.StreamGyroidToQuadMeshOutput(pb2.Empty()):
                         ts = time.strftime("%H:%M:%S",
                                           time.localtime(line.timestamp_ms / 1000))
                         wx.CallAfter(dlg.m_txtQMLog.AppendText,
                                      f"[{ts}] {line.line}\n")
+                        if line.line.startswith("ERROR:"):
+                            had_error = True
                 except grpc.RpcError:
                     pass
 
-                wx.CallAfter(dlg.m_statusQM.SetLabel, "Quad mesh complete.")
                 wx.CallAfter(dlg.m_btnRunQuadMesh.Enable, True)
                 wx.CallAfter(dlg.m_btnStopQuadMesh.Enable, False)
-                wx.CallAfter(dlg.m_btnConvertNurbs.Enable, True)
-                wx.CallAfter(dlg.m_btnViewPyVista.Enable, True)
-                wx.CallAfter(dlg.m_btnDownloadOBJ.Enable, True)
-
-                # Auto-render preview into WebView
-                wx.CallAfter(self._qm_render_preview, dlg)
+                if had_error:
+                    wx.CallAfter(dlg.m_statusQM.SetLabel,
+                                 "Quad mesh FAILED — see log. "
+                                 "Try setting Smoothing iterations to 0 and retry.")
+                else:
+                    wx.CallAfter(dlg.m_statusQM.SetLabel, "Quad mesh complete.")
+                    wx.CallAfter(dlg.m_btnConvertNurbs.Enable, True)
+                    wx.CallAfter(dlg.m_btnViewPyVista.Enable, True)
+                    wx.CallAfter(dlg.m_btnDownloadOBJ.Enable, True)
+                    # Auto-render preview into WebView
+                    wx.CallAfter(self._qm_render_preview, dlg)
 
             except grpc.RpcError as e:
                 wx.CallAfter(dlg.m_statusQM.SetLabel,
@@ -1049,6 +1104,7 @@ class WorkflowWizard(WorkflowWizardFrame):
         dlg.m_statusQM.SetLabel("Converting to NURBS…")
 
         def worker():
+            nurbs_error = False
             for sheet in sheets:
                 try:
                     wx.CallAfter(dlg.m_txtQMLog.AppendText,
@@ -1057,25 +1113,33 @@ class WorkflowWizard(WorkflowWizardFrame):
                         pb2.QuadToNurbsRequest(which=sheet, extra_args=nurbs_args))
                     wx.CallAfter(dlg.m_txtQMLog.AppendText, f"{resp.message}\n")
                     if not resp.success:
+                        nurbs_error = True
                         continue
 
-                    # Stream output
+                    # Stream output — track any ERROR lines
                     try:
                         for line in self._grpc.stub.StreamQuadToNurbsOutput(pb2.Empty()):
                             ts = time.strftime("%H:%M:%S",
                                               time.localtime(line.timestamp_ms / 1000))
                             wx.CallAfter(dlg.m_txtQMLog.AppendText,
                                          f"[{ts}] {line.line}\n")
+                            if line.line.startswith("ERROR:"):
+                                nurbs_error = True
                     except grpc.RpcError:
                         pass
 
                 except grpc.RpcError as e:
                     wx.CallAfter(dlg.m_txtQMLog.AppendText,
                                  f"NURBS error ({sheet}): {e}\n")
+                    nurbs_error = True
 
-            wx.CallAfter(dlg.m_statusQM.SetLabel, "NURBS conversion complete.")
             wx.CallAfter(dlg.m_btnConvertNurbs.Enable, True)
-            wx.CallAfter(dlg.m_btnDownloadSTEP.Enable, True)
+            if nurbs_error:
+                wx.CallAfter(dlg.m_statusQM.SetLabel,
+                             "NURBS conversion FAILED — see log.")
+            else:
+                wx.CallAfter(dlg.m_statusQM.SetLabel, "NURBS conversion complete.")
+                wx.CallAfter(dlg.m_btnDownloadSTEP.Enable, True)
 
         threading.Thread(target=worker, daemon=True).start()
 
