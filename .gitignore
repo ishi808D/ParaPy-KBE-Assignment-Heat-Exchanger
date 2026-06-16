@@ -2,3 +2,4 @@ parapy.lic
 *.step
 *.obj
 *.stl
+*.pyc
