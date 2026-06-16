@@ -1,34 +1,29 @@
 """
-encapsulation.py
-----------------
-Parametric CAD of the heat exchanger outer shell and port geometry.
+encapsulation.py  –  Parametric heat-exchanger shell + ports
 
-Ports are rectangular (matching the server's rectangular window patches)
-and are properly parameterized relative to the encapsulation geometry:
-  - Flush with the outer shell face
-  - Bore penetrates through the wall into the interior cavity
-  - Tube protrudes outward by tube_length
-  - Port offset from face centre is configurable
+Coordinate convention (matches ParaPy Box: width=X, length=Y, height=Z):
+  +X → flow direction  (Box.width = self.length)
+  +Y → transverse      (Box.length = self.width)
+  +Z → vertical        (Box.height = self.height)
+  Origin at minimum corner (centered=False).
+
+Ports are flush with the shell face and bore through the wall.
 """
 
 from parapy.core import Input, Attribute, Part
 from parapy.core.validate import Range
-from parapy.geom import (GeomBase, Box, SubtractedSolid, translate)
+from parapy.geom import GeomBase, Box, SubtractedSolid, translate
 
 
 class InletOutletSpec(GeomBase):
-    """Single rectangular port (inlet or outlet).
-
-    Position should be at the OUTER shell face, centred on the port.
-    The tube protrudes outward (+X for outlet, -X for inlet).
-    """
+    """Rectangular port: tube protruding from the shell + bore through wall."""
 
     bore_width:   float = Input(0.010, validator=Range(1e-3, 0.5))
     bore_height:  float = Input(0.015, validator=Range(1e-3, 0.5))
     tube_wall:    float = Input(0.001, validator=Range(1e-4, 0.02))
     tube_length:  float = Input(0.020, validator=Range(1e-3, 0.5))
     shell_wall:   float = Input(0.003, validator=Range(1e-4, 0.05))
-    tube_color:   str   = Input("DarkBlue")
+    tube_color:   str   = Input("DarkGreen")
     is_inlet:     bool  = Input(True)
 
     @Attribute
@@ -40,20 +35,27 @@ class InletOutletSpec(GeomBase):
         return self.bore_height + 2 * self.tube_wall
 
     @Attribute
-    def direction(self):
-        """Outward direction multiplier: -1 for inlet (protrudes in -X), +1 for outlet."""
-        return -1.0 if self.is_inlet else 1.0
+    def tube_x_start(self):
+        return -self.tube_length if self.is_inlet else 0.0
+
+    @Attribute
+    def bore_total_x(self):
+        return self.tube_length + self.shell_wall + 0.002
+
+    @Attribute
+    def bore_x_start(self):
+        return -self.tube_length - 0.001 if self.is_inlet else -self.shell_wall - 0.001
 
     @Part
     def tube(self):
-        """Rectangular tube protruding outward from the shell face."""
+        """Rectangular tube protruding from the shell face along X."""
         return Box(
-            width=self.tube_outer_w,
-            length=self.tube_length,
+            width=self.tube_length,
+            length=self.tube_outer_w,
             height=self.tube_outer_h,
             centered=False,
             position=translate(self.position,
-                               'x', 0 if self.direction > 0 else -self.tube_length,
+                               'x', self.tube_x_start,
                                'y', -self.tube_outer_w / 2,
                                'z', -self.tube_outer_h / 2),
             color=self.tube_color,
@@ -62,15 +64,14 @@ class InletOutletSpec(GeomBase):
 
     @Part
     def bore(self):
-        """Rectangular bore cutting through the wall + tube.
-        Used as a boolean tool to create the port hole in the shell."""
+        """Rectangular bore cutting through the wall."""
         return Box(
-            width=self.bore_width,
-            length=self.tube_length + self.shell_wall + 0.001,
+            width=self.bore_total_x,
+            length=self.bore_width,
             height=self.bore_height,
             centered=False,
             position=translate(self.position,
-                               'x', -self.shell_wall - 0.0005,
+                               'x', self.bore_x_start,
                                'y', -self.bore_width / 2,
                                'z', -self.bore_height / 2),
             color="White",
@@ -85,24 +86,23 @@ class InletOutletSpec(GeomBase):
 class Encapsulation(GeomBase):
     """Hollow rectangular shell with inlet/outlet ports.
 
-    Ports are parameterized relative to the shell:
-    - Position is derived from shell dimensions + offsets
-    - Bore cuts through the shell wall
-    - Ports never float — they're always flush with the face
+    Box mapping: width=length(X), length=width(Y), height=height(Z).
+    Ports parameterized relative to the shell faces.
     """
 
+    # external dimensions [m]
     length:         float = Input(0.250, validator=Range(1e-3, 10.0))
     width:          float = Input(0.250, validator=Range(1e-3, 10.0))
     height:         float = Input(0.300, validator=Range(1e-3, 10.0))
     wall_thickness: float = Input(0.003, validator=Range(2e-4, 0.05))
 
-    # port bore matches server window_size_mm / 1000
+    # port bore dimensions [m] (matches server window_size_mm / 1000)
     inlet_bore_width:   float = Input(0.010)
     inlet_bore_height:  float = Input(0.015)
     outlet_bore_width:  float = Input(0.010)
     outlet_bore_height: float = Input(0.015)
 
-    # port centre offset from face centre [m]
+    # port offset from face centre [m]
     inlet_offset_y:  float = Input(0.0)
     inlet_offset_z:  float = Input(0.0)
     outlet_offset_y: float = Input(0.0)
@@ -116,17 +116,22 @@ class Encapsulation(GeomBase):
 
     @Part
     def outer_box(self):
-        return Box(width=self.width, length=self.length, height=self.height,
-                   centered=False, position=self.position,
-                   color="SteelBlue", transparency=0.7,
-                   mesh_deflection=self.mesh_deflection)
+        """Outer shell. width=length(X), length=width(Y), height(Z)."""
+        return Box(
+            width=self.length,       # X = flow direction
+            length=self.width,       # Y = transverse
+            height=self.height,      # Z = vertical
+            centered=False,
+            position=self.position,
+            color="SteelBlue", transparency=0.7,
+            mesh_deflection=self.mesh_deflection)
 
     @Part
     def inner_void(self):
         """Cavity subtracted to form the shell."""
         return Box(
-            width=self.width - 2 * self.wall_thickness,
-            length=self.length - 2 * self.wall_thickness,
+            width=self.length - 2 * self.wall_thickness,
+            length=self.width - 2 * self.wall_thickness,
             height=self.height - 2 * self.wall_thickness,
             centered=False,
             position=translate(self.position,
@@ -139,27 +144,30 @@ class Encapsulation(GeomBase):
     @Part
     def shell_basic(self):
         """Hollow box before port holes."""
-        return SubtractedSolid(shape_in=self.outer_box, tool=self.inner_void,
-                               color="SteelBlue", transparency=0.5,
-                               hidden=True, mesh_deflection=self.mesh_deflection)
+        return SubtractedSolid(
+            shape_in=self.outer_box, tool=self.inner_void,
+            color="SteelBlue", transparency=0.5, hidden=True,
+            mesh_deflection=self.mesh_deflection)
 
     @Part
     def shell_with_inlet(self):
         """Shell with inlet bore cut."""
-        return SubtractedSolid(shape_in=self.shell_basic, tool=self.inlet.bore,
-                               color="SteelBlue", transparency=0.5,
-                               hidden=True, mesh_deflection=self.mesh_deflection)
+        return SubtractedSolid(
+            shape_in=self.shell_basic, tool=self.inlet.bore,
+            color="SteelBlue", transparency=0.5, hidden=True,
+            mesh_deflection=self.mesh_deflection)
 
     @Part
     def shell(self):
         """Final shell with both port holes."""
-        return SubtractedSolid(shape_in=self.shell_with_inlet, tool=self.outlet.bore,
-                               color="SteelBlue", transparency=0.5,
-                               mesh_deflection=self.mesh_deflection)
+        return SubtractedSolid(
+            shape_in=self.shell_with_inlet, tool=self.outlet.bore,
+            color="SteelBlue", transparency=0.5,
+            mesh_deflection=self.mesh_deflection)
 
     @Part
     def inlet(self):
-        """Port at x=0 face. Parameterized from shell dimensions."""
+        """Port at x=0 face (flow entrance). Centred on the YZ face."""
         return InletOutletSpec(
             bore_width=self.inlet_bore_width,
             bore_height=self.inlet_bore_height,
@@ -169,13 +177,13 @@ class Encapsulation(GeomBase):
             tube_color="DarkGreen",
             is_inlet=True,
             position=translate(self.position,
-                               'x', 0,
+                               'x', 0,                                   # x=0 face
                                'y', self.width / 2 + self.inlet_offset_y,
                                'z', self.height / 2 + self.inlet_offset_z))
 
     @Part
     def outlet(self):
-        """Port at x=length face. Parameterized from shell dimensions."""
+        """Port at x=length face (flow exit). Centred on the YZ face."""
         return InletOutletSpec(
             bore_width=self.outlet_bore_width,
             bore_height=self.outlet_bore_height,
@@ -185,7 +193,7 @@ class Encapsulation(GeomBase):
             tube_color="FireBrick",
             is_inlet=False,
             position=translate(self.position,
-                               'x', self.length,
+                               'x', self.length,                           # x=length face
                                'y', self.width / 2 + self.outlet_offset_y,
                                'z', self.height / 2 + self.outlet_offset_z))
 
