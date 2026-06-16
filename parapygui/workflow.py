@@ -43,14 +43,32 @@ def _plotly_html(traces, layout):
             f'Plotly.newPlot("p",{json.dumps(traces)},{json.dumps(layout)},'
             f'{{responsive:true}})</script></body></html>')
 
-def _convergence_html(iters, objs, cstrs=None, title="Convergence"):
-    traces = [{"x": iters, "y": objs, "mode": "lines+markers", "name": "Objective"}]
+def _convergence_html(iters, objs, cstrs=None, title="Convergence", g_oh=None):
+    traces = [{"x": iters, "y": objs, "mode": "lines+markers",
+               "name": "Objective", "yaxis": "y"}]
+    layout = {
+        "title": title,
+        "xaxis": {"title": "Iteration"},
+        "yaxis": {"title": "Objective", "side": "left", "rangemode": "tozero"},
+        "margin": {"t": 40, "b": 40, "l": 70, "r": 70},
+        "template": "plotly_white",
+    }
+    right_offset = 0
     if cstrs:
-        traces.append({"x": iters, "y": cstrs, "mode": "lines",
-                       "name": "Constraint", "line": {"dash": "dash"}})
-    layout = {"title": title, "xaxis": {"title": "Iteration"},
-              "yaxis": {"title": "Value"}, "margin": {"t": 40, "b": 40, "l": 55, "r": 20},
-              "template": "plotly_white"}
+        traces.append({"x": iters, "y": cstrs, "mode": "lines+markers",
+                       "name": "Constraint", "line": {"dash": "dash"}, "yaxis": "y2"})
+        layout["yaxis2"] = {"title": "Constraint", "overlaying": "y",
+                            "side": "right", "showgrid": False, "rangemode": "tozero"}
+        right_offset = 1
+    if g_oh:
+        axis_key = f"yaxis{2 + right_offset}"
+        trace_axis = f"y{2 + right_offset}"
+        traces.append({"x": iters, "y": g_oh, "mode": "lines+markers",
+                       "name": "g_oh", "line": {"dash": "dot"}, "yaxis": trace_axis})
+        layout[axis_key] = {"title": "g_oh", "overlaying": "y",
+                            "side": "right", "showgrid": False,
+                            "anchor": "free", "position": 1.0, "rangemode": "tozero"}
+        layout["margin"]["r"] = 120
     return _plotly_html(traces, layout)
 
 def _empty_html(msg="Waiting for data…"):
@@ -99,7 +117,7 @@ class WorkflowWizard(WorkflowWizardFrame):
     def __init__(self, parent, parapy_obj):
         super().__init__(parent, parapy_obj)
         self._page = 0
-        self._opt_iters, self._opt_objs, self._opt_cstrs = [], [], []
+        self._opt_iters, self._opt_objs, self._opt_cstrs, self._opt_g_oh = [], [], [], []
         self._stop = threading.Event()
         self._last_obj_path = None
         self._last_stl_paths = []
@@ -797,7 +815,7 @@ class WorkflowWizard(WorkflowWizardFrame):
     def onStartOpt(self, event):
         self.m_btnStartOpt.Enable(False)
         self.m_statusLabel.SetLabel("Starting optimisation…")
-        self._opt_iters.clear(); self._opt_objs.clear(); self._opt_cstrs.clear()
+        self._opt_iters.clear(); self._opt_objs.clear(); self._opt_cstrs.clear(); self._opt_g_oh.clear()
         self._stop.clear()
         self._set_sim_running(True)
         threading.Thread(target=self._run_worker, args=("optimize",), daemon=True).start()
@@ -984,22 +1002,29 @@ class WorkflowWizard(WorkflowWizardFrame):
                     wx.CallAfter(self._safe_status,
                                  f"Metrics keys: {', '.join(keys)}")
 
-                # Try to extract values with multiple possible key names
-                for key_attempts, target_list in [
-                    (["DissPower", "dissPower", "Disspower", "dissipation", "objective"], self._opt_objs),
-                    (["meantT", "meanT", "MeanT", "constraint"], self._opt_cstrs),
-                ]:
-                    for k in key_attempts:
-                        if k in row.values:
-                            target_list.append(row.values[k])
-                            break
+                # Extract all three metrics; append together to keep lists in sync
+                obj_val, cstr_val, goh_val = None, None, None
+                for k in ["DissPower", "dissPower", "Disspower", "dissipation", "objective"]:
+                    if k in row.values:
+                        obj_val = row.values[k]; break
+                for k in ["meantT", "meanT", "MeanT", "constraint", "g_meanT"]:
+                    if k in row.values:
+                        cstr_val = row.values[k]; break
+                for k in ["g_oh", "G_oh"]:
+                    if k in row.values:
+                        goh_val = row.values[k]; break
 
-                if self._opt_objs:
+                if obj_val is not None:
+                    self._opt_objs.append(obj_val)
+                    self._opt_cstrs.append(cstr_val if cstr_val is not None else 0.0)
+                    self._opt_g_oh.append(goh_val if goh_val is not None else 0.0)
                     self._opt_iters = list(range(len(self._opt_objs)))
+                    _cstr_plot = self._opt_cstrs if any(v != 0.0 for v in self._opt_cstrs) else None
+                    _g_oh_plot  = self._opt_g_oh  if any(v != 0.0 for v in self._opt_g_oh)  else None
                     wx.CallAfter(webview.SetPage,
                                  _convergence_html(self._opt_iters, self._opt_objs,
-                                                   self._opt_cstrs if self._opt_cstrs else None,
-                                                   "Optimization Metrics"), "")
+                                                   _cstr_plot, "Optimization Metrics",
+                                                   g_oh=_g_oh_plot), "")
         except Exception:
             pass
 
@@ -1009,7 +1034,8 @@ class WorkflowWizard(WorkflowWizardFrame):
         meanT  = 0.0
 
         _DISSIP_KEYS = ["DissPower", "dissPower", "Disspower", "dissipation", "objective"]
-        _MEANT_KEYS  = ["meantT", "meanT", "MeanT", "constraint"]
+        _MEANT_KEYS  = ["meantT", "meanT", "MeanT", "constraint", "g_meanT"]
+        _G_OH_KEYS   = ["g_oh", "G_oh"]
 
         # ── 1. Try GetLatestMetrics ───────────────────────────────────────────
         try:
@@ -1032,7 +1058,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                 wx.CallAfter(self._safe_status,
                              f"History columns: {list(hist.columns)}")
 
-                iters, objs, cstrs = [], [], []
+                iters, objs, cstrs, g_oh_vals = [], [], [], []
                 for i, row in enumerate(hist.rows):
                     iters.append(i)
                     val = 0.0
@@ -1045,9 +1071,15 @@ class WorkflowWizard(WorkflowWizardFrame):
                         if k in row.values:
                             cval = row.values[k]; break
                     cstrs.append(cval)
+                    goh = 0.0
+                    for k in _G_OH_KEYS:
+                        if k in row.values:
+                            goh = row.values[k]; break
+                    g_oh_vals.append(goh)
 
-                self._opt_iters, self._opt_objs, self._opt_cstrs = iters, objs, cstrs
-                html = _convergence_html(iters, objs, cstrs, "Optimization History")
+                self._opt_iters, self._opt_objs, self._opt_cstrs, self._opt_g_oh = iters, objs, cstrs, g_oh_vals
+                _g_oh_plot = g_oh_vals if any(v != 0.0 for v in g_oh_vals) else None
+                html = _convergence_html(iters, objs, cstrs, "Optimization History", g_oh=_g_oh_plot)
                 target = self.m_webviewResults if mode == "optimize" else webview
                 wx.CallAfter(target.SetPage, html, "")
 
@@ -1103,9 +1135,11 @@ class WorkflowWizard(WorkflowWizardFrame):
         self.m_txtIterCount.SetValue(str(len(self._opt_iters)))
         self.m_txtConverged.SetValue("Yes" if self._opt_iters else "—")
         if self._opt_iters:
+            _g_oh_plot = self._opt_g_oh if any(v != 0.0 for v in self._opt_g_oh) else None
             self.m_webviewResults.SetPage(
                 _convergence_html(self._opt_iters, self._opt_objs,
-                                  self._opt_cstrs, "Final Convergence"), "")
+                                  self._opt_cstrs, "Final Convergence",
+                                  g_oh=_g_oh_plot), "")
         self.m_btnStartOpt.Enable(True)
         self._safe_status("Optimisation complete.")
         self._completed.add("optimize")

@@ -738,7 +738,7 @@ class QuadMeshExportDialog ( wx.Dialog ):
         for lbl, attr, lo, hi, val, inc, tip in [
             ("Angular criterion (°):",    "m_spinAngular",    1, 90, 30, 1,
              "Minimum facet angle for CGAL surface meshing  for CGAL criteria (look on the internet for CGAL criteria)"),
-            ("Radius criterion (mm):",    "m_spinRadius",     0.1, 50, 1.0, 0.1,
+            ("Radius criterion (mm):",    "m_spinRadius",     0.01, 50, 0.04, 0.01,
              "Maximum surface approximation radiusv for CGAL criteria (look on the internet for CGAL criteria). This parameter determines the mesh resolution"),
             ("Distance criterion (mm):",  "m_spinDistance",   0.1, 50, 3.5, 0.1,
              "Maximum distance from surface for CGAL criteria (look on the internet for CGAL criteria)"),
