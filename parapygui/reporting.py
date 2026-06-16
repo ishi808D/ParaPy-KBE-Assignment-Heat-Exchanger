@@ -92,18 +92,39 @@ class ReportGenerator(Base):
     # ── page builders ─────────────────────────────────────────────────
 
     def _page_summary(self, plt, pdf):
-        fig = plt.figure(figsize=(8.27, 11.69))
-        fig.suptitle("Bio-Inspired Heat Exchanger — Design Summary",
-                     fontsize=15, fontweight="bold", y=0.98)
         lines = [f"Generated: {datetime.now():%Y-%m-%d %H:%M}", ""]
         lines += self._dict_to_lines(self.design_summary)
         if self.manufacturability_summary:
             lines += ["", "── Manufacturability ──"]
             lines += self._dict_to_lines(self.manufacturability_summary)
-        fig.text(0.07, 0.92, "\n".join(lines), va="top", ha="left",
-                 family="monospace", fontsize=9)
-        pdf.savefig(fig)
-        plt.close(fig)
+
+        # A4 body available after title (y 0.92 → 0.01, ~0.91 of 11.69 in = 10.64 in).
+        # Line height = fontsize * 1.2 / 72.  Fit everything into [5.5, 9] pt;
+        # if still too many lines, paginate at the clamped size.
+        PAGE_H_IN   = 11.69
+        TEXT_FRAC   = 0.91          # fraction of page available for text lines
+        LEAD        = 1.2           # line-height multiplier
+        MAX_FS      = 9.0
+        MIN_FS      = 5.5
+
+        avail_in = PAGE_H_IN * TEXT_FRAC
+        ideal_fs = avail_in * 72.0 / (max(len(lines), 1) * LEAD)
+        fontsize  = max(MIN_FS, min(MAX_FS, ideal_fs))
+        lpp       = int(avail_in * 72.0 / (fontsize * LEAD))  # lines per page
+
+        chunks = [lines[i:i + lpp] for i in range(0, len(lines), lpp)]
+        n_pages = len(chunks)
+
+        for page_idx, chunk in enumerate(chunks):
+            fig = plt.figure(figsize=(8.27, PAGE_H_IN))
+            title = "Bio-Inspired Heat Exchanger — Design Summary"
+            if n_pages > 1:
+                title += f"  ({page_idx + 1} / {n_pages})"
+            fig.suptitle(title, fontsize=15, fontweight="bold", y=0.98)
+            fig.text(0.07, 0.92, "\n".join(chunk), va="top", ha="left",
+                     family="monospace", fontsize=fontsize)
+            pdf.savefig(fig)
+            plt.close(fig)
 
     def _page_geometry(self, plt, pdf):
         """Render each STL with PyVista and embed as an image per row."""

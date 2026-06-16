@@ -433,7 +433,7 @@ class HeatExchanger(GeomBase):
     def design_summary(self) -> dict:
         """Complete design summary for the PDF report."""
         enc = self.encapsulation
-        return {
+        d = {
             "encapsulation": {
                 "length_mm": round(enc.length * 1e3, 2),
                 "width_mm":  round(enc.width * 1e3, 2),
@@ -445,25 +445,124 @@ class HeatExchanger(GeomBase):
             "flow": {
                 "v_in_m_s":  self.inflow_velocity,
                 "T_in_K":    self.inflow_temperature,
+                "T_ext_K":   self.exterior_temperature,
                 "p_out_Pa":  self.outlet_pressure,
                 "Re":        round(self.reynolds_number, 1),
                 "Pr":        round(self.fluid.prandtl_number, 3),
             },
+            "fluid_properties": {
+                "kinematic_viscosity_m2_s": self.fluid.kinematic_viscosity,
+                "density_kg_m3":            self.fluid.density,
+                "conductivity_W_mK":        self.fluid.conductivity,
+                "specific_heat_J_kgK":      self.fluid.specific_heat,
+                "dynamic_viscosity_Pas":    round(self.fluid.dynamic_viscosity, 8),
+                "thermal_diffusivity_m2_s": round(self.fluid.thermal_diffusivity, 10),
+            },
+            "material_properties": {
+                "solid_conductivity_W_mK":  self.ks,
+                "fluid_conductivity_W_mK":  self.kf,
+                "solid_density_g_mm3":      self.solid_density_g_per_mm3,
+                "rhoc_J_m3K":               self.rhoc,
+                "darcy_number":             self.darcy_number,
+                "hconv_W_m2K":              self.hconv,
+                "qu_regularisation":        self.qu,
+            },
             "sizing": self.sizing.summary,
             "lattice": {
-                "tpms":      "gyroid",
-                "k0_rad_m":  self.initial_wavenumber,
-                "uc_mm":     round(self.lattice.frequency_field.mean_unit_cell_size * 1e3, 2),
-                "phi":       round(self.sizing.required_solidity, 4),
+                "tpms":        "gyroid",
+                "k0_rad_m":    round(self.initial_wavenumber, 3),
+                "uc_mm":       round(self.lattice.frequency_field.mean_unit_cell_size * 1e3, 2),
+                "phi":         round(self.sizing.required_solidity, 4),
+                "iso_level":   self.iso_level,
+                "wall_mm":     self.gyroid_wall,
+                "unit_mm":     self.gyroid_unit,
+                "epsilon_mm":  self.epsilon,
+                "kbound_rad_mm": self.kbound,
             },
             "preview_geometry": {
                 "solidity":       round(self.gyroid_preview.solidity, 4),
+                "solid_volume_cm3": round(self.gyroid_preview.solid_volume * 1e6, 3),
                 "mass_g":         round(self.gyroid_preview.mass * 1e3, 2),
                 "surface_cm2":    round(self.gyroid_preview.surface_area * 1e4, 1),
                 "n_triangles":    self.gyroid_preview.n_triangles,
             },
             "manufacturability": self.manufacturability.summary,
+            "optimization_settings": {
+                "mode":               self.opt_mode,
+                "method":             self.optimization_method,
+                "max_iterations":     self.max_iterations,
+                "parallel_cores":     self.parallel_cores,
+                "meantT_max_K":       self.meantT_max,
+                "dissPower_max_W":    self.dissPower_max,
+                "spacing_mm":         self.spacing,
+                "bake_spacing_mm":    self.bake_spacing,
+                "pareto_enabled":     self.pareto_enabled,
+            },
+            "am_settings": {
+                "no_overhang":          self.no_overhang,
+                "am_theta_deg":         self.am_theta,
+                "am_L_bridge_mm":       self.am_L_bridge,
+                "align_build_to_flow":  self.am_align_build_to_flow,
+                "build_direction":      (
+                    "flow-aligned" if self.am_align_build_to_flow
+                    else str(self.build_direction)
+                ),
+            },
         }
+
+        # Simulation-derived performance metrics — fall back gracefully if no run yet
+        try:
+            d["performance"] = {
+                "mass_flow_rate_kg_s":           round(self.mass_flow_rate, 6),
+                "outflow_temperature_K":         round(self.outflow_temperature, 3),
+                "delta_T_K":                     round(self.outflow_temperature - self.inflow_temperature, 3),
+                "heat_transfer_coeff_W_m2K":     round(self.heat_transfer_coefficient, 3),
+                "nusselt_number_sim":            round(self.nusselt_number, 3),
+                "nusselt_number_empirical":      round(self.nusselt_number_empirical, 3),
+                "friction_factor_empirical":     round(self.friction_empirical, 5),
+                "pressure_drop_empirical_Pa":    round(self.pressure_drop_empirical, 3),
+                "dissipation_power_empirical_W": round(self.disspower_empirical, 5),
+                "heat_transfer_empirical_W_m2K": round(self.heat_transfer_empirical, 3),
+            }
+        except Exception:
+            pass
+
+        # Optimisation results — only shown when a run has been completed
+        try:
+            base_d = self.baseline_dissipation
+            opt_d  = self.opt_dissipation
+            base_T = self.baseline_mean_temp
+            opt_T  = self.opt_mean_temp
+            if base_d > 0 or opt_d > 0 or base_T > 0 or opt_T > 0:
+                res: dict = {
+                    "baseline_dissipation_W": round(base_d, 4),
+                    "baseline_mean_temp_K":   round(base_T, 3),
+                    "opt_dissipation_W":      round(opt_d, 4),
+                    "opt_mean_temp_K":        round(opt_T, 3),
+                }
+                if base_d > 0 and opt_d > 0:
+                    res["dissipation_reduction_pct"] = round(
+                        100.0 * (base_d - opt_d) / base_d, 1)
+                if base_T > 0 and opt_T > 0:
+                    res["mean_temp_reduction_pct"] = round(
+                        100.0 * (base_T - opt_T) / base_T, 1)
+                d["optimization_results"] = res
+        except Exception:
+            pass
+
+        # PySLM LPBF build analysis — skipped when STL not yet exported
+        try:
+            pyslm_rep = self.pyslm.report
+            if pyslm_rep.get("status") == "ok":
+                d["lpbf_build_analysis"] = {k: v for k, v in pyslm_rep.items()
+                                             if k != "status"}
+            elif pyslm_rep.get("status") == "skipped":
+                d["lpbf_build_analysis"] = {"status": "skipped",
+                                             "reason": pyslm_rep.get("reason", "")}
+        except Exception:
+            pass
+
+        return d
 
     # ═════════════════════════════════════════════════════════════════
     # Actions  (fire from GUI: right-click → Evaluate)

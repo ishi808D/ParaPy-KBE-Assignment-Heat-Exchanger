@@ -110,13 +110,8 @@ class SemiEmpirical(Base):
     def summary(self) -> dict:
         """Flat dict for PDF report and design_summary."""
         return {
-            "Re_simulation":                round(self.simulation_re, 1),
-            "Re_operating":                 round(self.operating_re, 1),
-            "Nu_laminar":                   round(self.nu_laminar, 3),
-            "Nu_turbulent":                 round(self.nu_turbulent, 3),
-            "target_Nu":                    round(self.target_nusselt, 3),
-            "required_solidity":            round(self.required_solidity, 4),
+            "Re":                 round(self.operating_re, 1),
+            "Nu":                   round(self.nu_laminar, 3),
             "wall_thickness_est_mm":        round(self.wall_thickness_estimate * 1e3, 4),
             "h_W_m2K":                      round(self.heat_transfer_coeff, 2),
-            "lam_turb_factor":              round(self.lam_turb_factor, 4),
         }

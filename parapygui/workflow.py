@@ -2210,6 +2210,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                     opt_iters=list(self._opt_iters),
                     opt_objs=list(self._opt_objs),
                     opt_cstrs=list(self._opt_cstrs),
+                    opt_g_oh=list(self._opt_g_oh),
                     history_columns=hist_columns,
                     history_rows=hist_rows,
                 )
