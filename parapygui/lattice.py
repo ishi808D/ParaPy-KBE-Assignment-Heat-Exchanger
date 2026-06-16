@@ -80,9 +80,6 @@ class LatticeFormulation(Base):
     This is what gets serialised and sent to the gRPC server before each run.
     """
 
-    #: TPMS type identifier  (default: gyroid)
-    tpms_type: str = Input("gyroid")
-
     #: Wall thickness extruded from the zero-level surface  [m]
     wall_thickness: float = Input(
         3e-4, validator=Range(5e-5, 5e-3))
@@ -119,7 +116,6 @@ class LatticeFormulation(Base):
         """Key-value pairs for ``client.py patch-config``."""
         ff = self.frequency_field
         return {
-            "lattice.tpms_type":       self.tpms_type,
             "lattice.wall_thickness":  self.wall_thickness,
             "lattice.kx_values":       str(ff.kx),
             "lattice.ky_values":       str(ff.ky),

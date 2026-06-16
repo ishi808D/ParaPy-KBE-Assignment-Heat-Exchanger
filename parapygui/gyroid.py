@@ -1,7 +1,7 @@
 """
 gyroid.py
 ---------
-TPMS gyroid mesh generation for live design-space exploration.
+Gyroid mesh generation for live design-space exploration.
 
 Maps to UML classes: **VoxelGeometryRepresentation**, **GeometryRepresentation**
 
@@ -31,30 +31,10 @@ import numpy as np
 from parapy.core import Base, Input, Attribute
 
 
-# Implicit functions for the supported TPMS types.  Each returns the field
-# value F at grid coordinates (X, Y, Z) given wavenumber arrays kx, ky, kz.
 def _gyroid(X, Y, Z, kx, ky, kz):
     return (np.sin(kx * X) * np.cos(ky * Y) +
             np.sin(ky * Y) * np.cos(kz * Z) +
             np.sin(kz * Z) * np.cos(kx * X))
-
-
-def _schwartz_p(X, Y, Z, kx, ky, kz):
-    return np.cos(kx * X) + np.cos(ky * Y) + np.cos(kz * Z)
-
-
-def _diamond(X, Y, Z, kx, ky, kz):
-    return (np.sin(kx * X) * np.sin(ky * Y) * np.sin(kz * Z) +
-            np.sin(kx * X) * np.cos(ky * Y) * np.cos(kz * Z) +
-            np.cos(kx * X) * np.sin(ky * Y) * np.cos(kz * Z) +
-            np.cos(kx * X) * np.cos(ky * Y) * np.sin(kz * Z))
-
-
-TPMS_FUNCS = {
-    "gyroid":     _gyroid,
-    "schwartz_p": _schwartz_p,
-    "diamond":    _diamond,
-}
 
 
 class GyroidMesh(Base):
@@ -78,9 +58,6 @@ class GyroidMesh(Base):
     kx: list = Input([628.0])
     ky: list = Input([628.0])
     kz: list = Input([628.0])
-
-    #: TPMS type
-    tpms_type: str = Input("gyroid")
 
     #: iso-level controlling wall thickness / solidity  (|F| < iso = solid)
     iso_level: float = Input(0.3)
@@ -159,8 +136,7 @@ class GyroidMesh(Base):
         zs = np.linspace(0, self.height, nz)
         X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
         KX, KY, KZ = self.wavenumber_grids
-        func = TPMS_FUNCS.get(self.tpms_type, _gyroid)
-        return func(X, Y, Z, KX, KY, KZ)
+        return _gyroid(X, Y, Z, KX, KY, KZ)
 
     # ── derived mesh ─────────────────────────────────────────────────
 

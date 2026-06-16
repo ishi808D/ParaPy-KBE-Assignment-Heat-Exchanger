@@ -187,22 +187,6 @@ class WorkflowWizard(WorkflowWizardFrame):
             self.m_spinRhoFluid.SetValue(1000.0)
 
         # lattice preview parameters
-        try:
-            import math
-            k = float(getattr(obj, "initial_wavenumber", 628.0))
-            self.m_spinUnitCellMM.SetValue(2 * math.pi / k * 1000 if k > 0 else 10.0)
-        except Exception:
-            self.m_spinUnitCellMM.SetValue(10.0)
-        try:
-            self.m_spinIsoLevel.SetValue(float(getattr(obj, "iso_level", 0.3)))
-        except Exception:
-            self.m_spinIsoLevel.SetValue(0.3)
-        try:
-            tpms = getattr(obj, "tpms_type", "gyroid")
-            choices = ["gyroid", "schwartz_p", "diamond"]
-            self.m_choiceTpms.SetSelection(choices.index(tpms) if tpms in choices else 0)
-        except Exception:
-            pass
 
     def _write_gui_to_parapy(self):
         """Push GUI spinner values back to ParaPy @Inputs.
@@ -247,21 +231,6 @@ class WorkflowWizard(WorkflowWizardFrame):
         except Exception as e:
             print(f"[workflow] _write_gui_to_parapy: opt_mode — {e}")
         # lattice preview
-        import math
-        try:
-            uc_mm = self.m_spinUnitCellMM.GetValue()
-            obj.initial_wavenumber = 2 * math.pi / (uc_mm / 1000) if uc_mm > 0 else 628.0
-        except Exception as e:
-            print(f"[workflow] _write_gui_to_parapy: initial_wavenumber — {e}")
-        try:
-            obj.iso_level = self.m_spinIsoLevel.GetValue()
-        except Exception as e:
-            print(f"[workflow] _write_gui_to_parapy: iso_level — {e}")
-        try:
-            choices = ["gyroid", "schwartz_p", "diamond"]
-            obj.tpms_type = choices[self.m_choiceTpms.GetSelection()]
-        except Exception as e:
-            print(f"[workflow] _write_gui_to_parapy: tpms_type — {e}")
 
     def _update_parapy_geometry(self):
         """Force ParaPy to recompute geometry after wizard values change.
@@ -273,9 +242,6 @@ class WorkflowWizard(WorkflowWizardFrame):
         if not obj:
             return
 
-        import math
-        uc_mm = self.m_spinUnitCellMM.GetValue()
-        choices = ["gyroid", "schwartz_p", "diamond"]
         geo_writes = [
             ("enc_length",         self.m_spinSizeX.GetValue()     / 1000),
             ("enc_width",          self.m_spinSizeY.GetValue()     / 1000),
@@ -285,9 +251,6 @@ class WorkflowWizard(WorkflowWizardFrame):
             ("inlet_bore_height",  self.m_spinInWinSY.GetValue()   / 1000),
             ("outlet_bore_width",  self.m_spinOutWinSX.GetValue()  / 1000),
             ("outlet_bore_height", self.m_spinOutWinSY.GetValue()  / 1000),
-            ("initial_wavenumber", 2 * math.pi / (uc_mm / 1000) if uc_mm > 0 else 628.0),
-            ("iso_level",          self.m_spinIsoLevel.GetValue()),
-            ("tpms_type",          choices[self.m_choiceTpms.GetSelection()]),
             ("baseline_dissipation", getattr(self, "_final_dissip", 0)),
             ("baseline_mean_temp",   getattr(self, "_final_meanT",  0)),
         ]
@@ -1615,79 +1578,91 @@ class WorkflowWizard(WorkflowWizardFrame):
         dlg.Destroy()
 
     def onSyncOptimizedField(self, event):
-        """Read the post-optimization kx/ky/kz field from the server config and
-        apply it to the ParaPy HeatExchanger, triggering a live viewport update.
+        """Download the optimised lattice STL from the server and load it into
+        the ParaPy viewport.  Also fetches kx/ky/kz for the export wizard.
         """
-        self.m_statusLabel.SetLabel("Fetching optimised field from server…")
+        obj = self.parapy_obj
+        if not obj:
+            self.m_statusLabel.SetLabel("No ParaPy object attached.")
+            return
+
+        self.m_statusLabel.SetLabel("Downloading optimised STL from server…")
 
         def worker():
+            from pathlib import Path
+
+            # ── 1. Download the lattice STL ──────────────────────────────────
+            out_dir = Path("outputs")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stl_path = None
+            try:
+                chunks = self._grpc.download_stl("lattice")
+                fh = None
+                for chunk in chunks:
+                    if fh is None:
+                        # use the server-provided filename, saved under outputs/
+                        fname = chunk.filename if chunk.filename else "optimized_lattice.stl"
+                        stl_path = out_dir / fname
+                        fh = open(stl_path, "wb")
+                    fh.write(chunk.data)
+                if fh:
+                    fh.close()
+            except Exception as e:
+                wx.CallAfter(self.m_statusLabel.SetLabel,
+                             f"STL download failed: {e}\n"
+                             "Run STL export on the server first (Step 4).")
+                return
+
+            if not stl_path or not stl_path.exists():
+                wx.CallAfter(self.m_statusLabel.SetLabel,
+                             "No STL data received — run the STL export step first.")
+                return
+
+            # ── 2. Push path to ParaPy — triggers viewport update ────────────
+            abs_path = str(stl_path.resolve())
+            try:
+                obj.opt_stl_path = abs_path
+            except Exception as e:
+                wx.CallAfter(self.m_statusLabel.SetLabel,
+                             f"ParaPy STL update error: {e}")
+                return
+
+            # ── 3. Also fetch kx/ky/kz for export wizard (best-effort) ───────
             try:
                 import ast
-                try:
-                    import yaml
-                except ImportError:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 "PyYAML not installed — run: pip install pyyaml")
-                    return
-
+                import yaml
                 resp = self._grpc.stub.GetConfig(pb2.Empty())
-                if not resp.success:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 f"GetConfig failed: {resp.error}")
-                    return
+                if resp.success:
+                    cfg = yaml.safe_load(resp.yaml_content)
+                    lat = cfg.get("lattice", {})
 
-                cfg = yaml.safe_load(resp.yaml_content)
-                lat = cfg.get("lattice", {})
+                    def _parse(v):
+                        if isinstance(v, list):
+                            return v
+                        if isinstance(v, str) and v.strip():
+                            try:
+                                return ast.literal_eval(v)
+                            except Exception:
+                                return []
+                        return []
 
-                def _parse(v):
-                    """Accept a YAML list, a Python-repr string, or None."""
-                    if isinstance(v, list):
-                        return v
-                    if isinstance(v, str) and v.strip():
-                        try:
-                            return ast.literal_eval(v)
-                        except Exception:
-                            return []
-                    return []
+                    kx   = _parse(lat.get("kx_values"))
+                    ky   = _parse(lat.get("ky_values"))
+                    kz   = _parse(lat.get("kz_values"))
+                    ctrl = _parse(lat.get("ctrl_locations"))
+                    if kx:
+                        obj.opt_kx = kx
+                        obj.opt_ky = ky if ky else kx
+                        obj.opt_kz = kz if kz else kx
+                        if ctrl:
+                            obj.opt_ctrl_locations = ctrl
+            except Exception:
+                pass  # kx/ky/kz sync is best-effort; STL is the primary result
 
-                kx   = _parse(lat.get("kx_values"))
-                ky   = _parse(lat.get("ky_values"))
-                kz   = _parse(lat.get("kz_values"))
-                ctrl = _parse(lat.get("ctrl_locations"))
-
-                if not kx:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 "lattice.kx_values not found in server config — "
-                                 "run the optimisation first.")
-                    return
-
-                obj = self.parapy_obj
-                if not obj:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 "No ParaPy object attached — field not synced.")
-                    return
-
-                try:
-                    obj.opt_kx = kx
-                    obj.opt_ky = ky if ky else kx
-                    obj.opt_kz = kz if kz else kx
-                    if ctrl:
-                        obj.opt_ctrl_locations = ctrl
-                except Exception as e:
-                    wx.CallAfter(self.m_statusLabel.SetLabel,
-                                 f"ParaPy sync error: {e}")
-                    return
-
-                n = len(kx)
-                all_k = kx + (ky or kx) + (kz or kx)
-                k_mean = sum(all_k) / len(all_k)
-                uc_mm = 6283.2 / k_mean if k_mean > 0 else 10.0  # 2π/k * 1000
-                wx.CallAfter(self.m_statusLabel.SetLabel,
-                             f"Optimised field synced: {n} ctrl pts, "
-                             f"mean unit cell {uc_mm:.1f} mm — check 3D viewport.")
-
-            except Exception as e:
-                wx.CallAfter(self.m_statusLabel.SetLabel, f"Sync error: {e}")
+            sz_kb = stl_path.stat().st_size / 1024
+            wx.CallAfter(self.m_statusLabel.SetLabel,
+                         f"Optimised STL loaded ({sz_kb:.0f} kB) — "
+                         f"check 3D viewport (optimized_lattice_stl Part).")
 
         threading.Thread(target=worker, daemon=True).start()
 

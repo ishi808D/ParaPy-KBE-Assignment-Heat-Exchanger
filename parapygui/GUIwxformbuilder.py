@@ -86,22 +86,6 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbEnc.Add(self.m_spinEncapWall, 0, wx.ALL, 4)
         szG.Add(sbEnc, 0, wx.EXPAND|wx.ALL, 5)
 
-        # -- lattice preview --
-        sbLat = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Lattice Preview (ParaPy viewport)")), wx.HORIZONTAL)
-        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"Type:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_choiceTpms = wx.Choice(sbLat.GetStaticBox(), wx.ID_ANY, choices=[u"gyroid", u"schwartz_p", u"diamond"])
-        self.m_choiceTpms.SetSelection(0)
-        sbLat.Add(self.m_choiceTpms, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 4)
-        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"  Unit cell (mm):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_spinUnitCellMM = wx.SpinCtrlDouble(sbLat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 1.0, 200.0, 10.0, 1.0)
-        self.m_spinUnitCellMM.SetToolTip(u"Unit cell size for the live gyroid preview (2π/k). Does not affect server mesh resolution.")
-        sbLat.Add(self.m_spinUnitCellMM, 0, wx.ALL, 4)
-        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"  Iso-level:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_spinIsoLevel = wx.SpinCtrlDouble(sbLat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.01, 1.5, 0.3, 0.05)
-        self.m_spinIsoLevel.SetToolTip(u"Iso-level controls wall thickness / solidity of the TPMS sheet. Higher = thicker walls.")
-        sbLat.Add(self.m_spinIsoLevel, 0, wx.ALL, 4)
-        szG.Add(sbLat, 0, wx.EXPAND|wx.ALL, 5)
-
         # -- inlet --
         sbIn = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Inlet")), wx.VERTICAL)
         fgIn = wx.FlexGridSizer(0, 4, 5, 10); fgIn.AddGrowableCol(1); fgIn.AddGrowableCol(3)

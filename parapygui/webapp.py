@@ -52,7 +52,6 @@ class DesignParams(BaseModel):
     enc_height:          float = 0.05
     enc_wall_thickness:  float = 0.002
     # Lattice
-    tpms_type:           str   = "gyroid"
     initial_wavenumber:  float = 628.0
     iso_level:           float = 0.30
     resolution:          int   = 50
@@ -102,7 +101,6 @@ def _push_design_config(p: DesignParams) -> None:
         "run.outlet_pressure":      p.outlet_pressure,
         "run.exterior_temperature": p.exterior_temperature,
         # lattice initial state
-        "lattice.tpms_type":       p.tpms_type,
         "lattice.wavenumber":      p.initial_wavenumber,
         "lattice.iso_level":       p.iso_level,
         # optimiser
@@ -158,7 +156,6 @@ def _build_gyroid(p: DesignParams):
         length=il, width=iw, height=ih,
         ctrl_locations=ctrl,
         kx=k, ky=k, kz=k,
-        tpms_type=p.tpms_type,
         iso_level=p.iso_level,
         resolution=p.resolution,
     )
@@ -374,7 +371,7 @@ async def generate_report(p: DesignParams) -> FileResponse:
             },
             "flow": {"Re": round(re,1), "Pr": round(fluid.prandtl_number,3),
                      "T_in_K": p.inflow_temperature},
-            "lattice": {"tpms": p.tpms_type,
+            "lattice": {"tpms": "gyroid",
                         "k_rad_m": p.initial_wavenumber,
                         "unit_cell_mm": round(2*pi/p.initial_wavenumber*1e3,2)},
             "sizing": sizing.summary,

@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 from parapy.core import Input, Attribute, Part, action
+from parapy.exchange import STLReader
 from parapy.geom import GeomBase
 
 from .encapsulation import Encapsulation
@@ -90,8 +92,6 @@ class HeatExchanger(GeomBase):
     mech_dissipation_upper:float = Input(10.0)
 
     # ── lattice ──────────────────────────────────────────────────────
-
-    tpms_type:           str   = Input("gyroid")
 
     #: Initial uniform wavenumber for the baseline simulation  [rad/m].
     #: 2π/k = unit-cell size, so k=628 → 10 mm cells (≈10 cells per 100 mm box).
@@ -150,6 +150,11 @@ class HeatExchanger(GeomBase):
     opt_ky: list = Input([], label="Optimised ky field (rad/m) per ctrl point")
     opt_kz: list = Input([], label="Optimised kz field (rad/m) per ctrl point")
 
+    #: Local path to the optimised lattice STL downloaded from the server.
+    #: Empty string = not yet downloaded.  When set, the viewport shows this
+    #: STL directly instead of the locally-regenerated gyroid_preview mesh.
+    opt_stl_path: str = Input("", label="Optimised STL path (local)")
+
     # ═════════════════════════════════════════════════════════════════
     # Parts  (product tree)
     # ═════════════════════════════════════════════════════════════════
@@ -207,7 +212,6 @@ class HeatExchanger(GeomBase):
     @Part
     def lattice(self):
         return LatticeFormulation(
-            tpms_type=self.tpms_type,
             _default_ctrl=self._ctrl_points,
             _default_k=[self.initial_wavenumber] * len(self._ctrl_points),
         )
@@ -261,8 +265,8 @@ class HeatExchanger(GeomBase):
 
         Uses the optimised kx/ky/kz field (opt_kx/ky/kz inputs) when it has
         been synced from the server, otherwise falls back to the uniform
-        initial_wavenumber baseline.  Solidity, mass and surface area are
-        read straight off this mesh.
+        initial_wavenumber baseline.  Hidden once the server's optimised STL
+        has been downloaded (opt_stl_path is set).
         """
         return GyroidMesh(
             length=self.enc_length - 2 * self.enc_wall_thickness,
@@ -272,10 +276,24 @@ class HeatExchanger(GeomBase):
             kx=self._eff_kx,
             ky=self._eff_ky,
             kz=self._eff_kz,
-            tpms_type=self.tpms_type,
             iso_level=self.iso_level,
             resolution=self.preview_resolution,
             material_density=self.lattice.material.density,
+            hidden=bool(self.opt_stl_path),
+        )
+
+    @Part
+    def optimized_lattice_stl(self):
+        """Server-generated optimised lattice STL, shown after "Sync →ParaPy".
+
+        Populated by the wizard's Sync button: the STL is downloaded from the
+        server via DownloadStl and saved locally, then opt_stl_path is set.
+        Hidden when opt_stl_path is empty (no download yet).
+        """
+        return STLReader(
+            filename=self.opt_stl_path if self.opt_stl_path else os.path.join("outputs", ".placeholder.stl"),
+            hidden=not bool(self.opt_stl_path),
+            color="DarkOrange",
         )
 
     @Part
@@ -389,7 +407,7 @@ class HeatExchanger(GeomBase):
             },
             "sizing": self.sizing.summary,
             "lattice": {
-                "tpms":      self.tpms_type,
+                "tpms":      "gyroid",
                 "k0_rad_m":  self.initial_wavenumber,
                 "uc_mm":     round(self.lattice.frequency_field.mean_unit_cell_size * 1e3, 2),
                 "phi":       round(self.sizing.required_solidity, 4),
@@ -504,7 +522,6 @@ class HeatExchanger(GeomBase):
                 kx=self._eff_kx,
                 ky=self._eff_ky,
                 kz=self._eff_kz,
-                tpms_type=self.tpms_type,
                 iso_level=self.iso_level,
                 resolution=self.export_resolution,
                 material_density=self.lattice.material.density,
