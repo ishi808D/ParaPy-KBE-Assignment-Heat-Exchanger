@@ -21,15 +21,14 @@ from info_button_templates import add_info_tip, add_info_button
 class WorkflowWizardFrame ( wx.Frame ):
     """Wizard popup launched from ParaPy @action. Receives the ParaPy object."""
 
-    NUM_PAGES = 7
+    NUM_PAGES = 6
     PAGE_TITLES = [
         u"Step 1: Geometry && Boundary Conditions",
         u"Step 2: Semi-Empirical Sizing",
         u"Step 3: Baseline Simulation",
-        u"Step 4: Optimizer Setup",
-        u"Step 5: Optimization Monitor",
-        u"Step 6: Results && Post-Processing",
-        u"Step 7: Print Preparation (PySLM)",
+        u"Step 4: Optimization Monitor",
+        u"Step 5: Results && Post-Processing",
+        u"Step 6: Print Preparation (PySLM)",
     ]
 
     def __init__( self, parent, parapy_obj=None ):
@@ -67,17 +66,14 @@ class WorkflowWizardFrame ( wx.Frame ):
             ("X:", "m_spinSizeX", 250.0,
              "Domain Size X",
              "Domain extent in X (width).\n"
-             "Defines the physical size of the simulation box.\n"
-             "Typical: 200–500 mm for bench-scale units."),
+             "Defines the physical size of the simulation box.\n"),
             ("Y:", "m_spinSizeY", 250.0,
              "Domain Size Y",
              "Domain extent in Y (depth).\n"
-             "Defines the physical size of the simulation box.\n"
-             "Typical: 200–500 mm."),
+             "Defines the physical size of the simulation box.\n"),
             ("Z:", "m_spinSizeZ", 300.0,
              "Domain Size Z",
-             "Domain extent in Z (height / main flow direction).\n"
-             "Typical: 200–400 mm."),
+             "Domain extent in Z (height / main flow direction).\n"),
         ]:
             sbDom.Add(wx.StaticText(sbDom.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
             s = wx.SpinCtrlDouble(sbDom.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 2000, val, 5)
@@ -91,16 +87,13 @@ class WorkflowWizardFrame ( wx.Frame ):
             ("X:", "m_spinCellsX", 75,
              "Mesh Cells X",
              "Number of mesh cells in the X direction.\n"
-             "Finer mesh → higher accuracy, longer runtime.\n"
-             "Recommended: 50–150 for optimisation runs."),
+             "Finer mesh → higher accuracy, longer runtime.\n"),
             ("Y:", "m_spinCellsY", 75,
              "Mesh Cells Y",
-             "Number of mesh cells in the Y direction.\n"
-             "Should match X for isotropic lateral resolution."),
+             "Number of mesh cells in the Y direction.\n"),
             ("Z:", "m_spinCellsZ", 90,
              "Mesh Cells Z",
-             "Number of mesh cells in the Z (flow) direction.\n"
-             "Slightly higher than X/Y resolves gradients along the flow axis."),
+             "Number of mesh cells in the Z (flow) direction.\n"),
         ]:
             sbCells.Add(wx.StaticText(sbCells.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
             s = wx.SpinCtrl(sbCells.GetStaticBox(), wx.ID_ANY, str(val), wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 5, 500, val)
@@ -113,7 +106,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         szG.Add(sbCells, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- Shape settings --
-        sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Shape settings")), wx.VERTICAL)
+        sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Shape settings (when scaling the geometry, scale these correspondingly)")), wx.VERTICAL)
         fgEnc = wx.FlexGridSizer(0, 3, 5, 10); fgEnc.AddGrowableCol(2)
         for lbl, attr, lo, hi, val, inc, _ititle, _imsg in [
             ("Encapsulation wall (mm):", "m_spinEncapWall",   0.5,  20,   3.0, 0.5,
@@ -128,7 +121,7 @@ class WorkflowWizardFrame ( wx.Frame ):
              "Typical for SLM/LPBF: 0.1–0.4 mm."),
             ("Gyroid unit cell (mm):",   "m_spinGyroidUnit",  0.1,  50,   1.8, 0.1,
              "Gyroid Unit Cell Size",
-             "Side length of one repeating gyroid unit cell (mm).\n"
+             "Initial side length of one repeating gyroid unit cell (mm).\n"
              "Smaller cells = more surface area per volume.\n"
              "Typical: 1–5 mm depending on manufacturing process."),
             (u"ε smoother (mm):",        "m_spinEpsilon",     0.01, 10,   0.2, 0.01,
@@ -140,16 +133,14 @@ class WorkflowWizardFrame ( wx.Frame ):
              "Control Point Spacing",
              "Spacing of RBF (radial basis function) control points\n"
              "used for wavenumber field interpolation (mm).\n"
-             "Coarser spacing -> faster but lower spatial resolution of k(x)."),
+             "Coarser spacing -> fewer optimisation parameters -> faster optimisation but possibly worse outcome."),
             ("RBF resolution (mm):",     "m_spinBakeSpacing", 0.1,  50,   1.4, 0.1,
              "RBF Bake Resolution",
-             "Voxel resolution for baking the RBF wavenumber field onto the mesh (mm).\n"
-             "Should be <= gyroid unit cell / 2 to satisfy the Nyquist criterion."),
+             "Resolution of the radial basis functions, below this size the radial basis functons are linearly interpolated (mm).\n"),
             ("Wavenumber field max (rad/mm):", "m_spinKboundShape", 0.001, 100, 3.4, 0.1,
              "Wavenumber Field Maximum",
              "Maximum allowed wavenumber k in the optimised field (rad/mm).\n"
-             "k = 2*pi / L_cell, so k_max = 3.4 rad/mm gives L_min ~1.85 mm.\n"
-             "Prevents the optimiser from producing unprintably fine features."),
+             "k = 2*pi / L_cell, so k_max = 3.4 rad/mm gives L_min ~1.85 mm.\n"),
         ]:
             fgEnc.Add(wx.StaticText(sbEnc.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
             add_info_button(sbEnc.GetStaticBox(), fgEnc, _ititle, _imsg)
@@ -235,9 +226,7 @@ class WorkflowWizardFrame ( wx.Frame ):
              "Also mirrors to T_initial — the starting fluid temperature."),
             (u"qα / qₖ (shape):",           "m_spinQu",        0.0001, 1.0,    0.005,   0.001,
              "Shape Regularisation Weight",
-             "Weight ratio controlling shape regularisation.\n"
-             "Trades off thermal performance against smooth, manufacturable geometry.\n"
-             "Higher values enforce smoother wavenumber fields."),
+             "See Informal Knowledge Model.\n"),
             (u"Kinematic visc (m²/s):",     "m_spinNu",        1e-8,   1e-3,   1e-6,    1e-7,
              "Kinematic Viscosity",
              "Kinematic viscosity of the fluid nu = mu/rho (m^2/s).\n"
@@ -302,14 +291,13 @@ class WorkflowWizardFrame ( wx.Frame ):
         add_info_button(sbRun.GetStaticBox(), szRunRow1, "Parallel Cores",
             "Number of parallel MPI processes for OpenFOAM.\n"
             "Set to the number of available CPU cores.\n"
-            "Must divide evenly into the mesh cell count for good load balancing.")
+            "Must divide evenly into the mesh cell count for good load balancing.\n" \
+            "If you get a crash later on, try reducing this number. (restart the container as well)")
         szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinMaxIter = wx.SpinCtrlDouble(sbRun.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 5000, 100, 10)
         szRunRow1.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
         add_info_button(sbRun.GetStaticBox(), szRunRow1, "Max Iterations",
-            "Maximum number of solver iterations per optimisation step.\n"
-            "Higher -> more accurate but slower per step.\n"
-            "Typical: 100–500 for OpenFOAM steady-state runs.")
+            "Number of optimisation iterations to run.\n")
         szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Opt. method:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_choiceOptMethod = wx.Choice(sbRun.GetStaticBox(), wx.ID_ANY,
             choices=[u"MMA", u"L-BFGS-B", u"trust-constr", u"pareto"])
@@ -317,10 +305,10 @@ class WorkflowWizardFrame ( wx.Frame ):
         szRunRow1.Add(self.m_choiceOptMethod, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
         add_info_button(sbRun.GetStaticBox(), szRunRow1, "Optimisation Method",
             "Optimisation algorithm:\n"
-            "  MMA         — Method of Moving Asymptotes (default; robust for topology opt.)\n"
+            "  MMA         — Method of Moving Asymptotes (default; robust for topology opt. USE THIS)\n"
             "  L-BFGS-B    — quasi-Newton, fast for smooth unconstrained problems\n"
             "  trust-constr — SciPy constrained solver, good for small problems\n"
-            "  pareto      — multi-objective Pareto front sweep")
+            "  pareto      — multi-objective Pareto front sweep. Takes very long")
         sbRun.Add(szRunRow1, 0, wx.EXPAND)
         # row 2: mode dropdown + conditional parameter panels
         szRunRow2 = wx.BoxSizer(wx.HORIZONTAL)
@@ -518,45 +506,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_simplebook.AddPage(self.m_panelBaseline, u"Baseline", False)
 
         # =============================================================
-        # PAGE 3 — Optimizer Setup
-        # =============================================================
-        self.m_panelOpt = wx.Panel(self.m_simplebook)
-        szOpt = wx.BoxSizer(wx.VERTICAL)
-
-        self.m_radioMode = wx.RadioBox(self.m_panelOpt, wx.ID_ANY,
-            _(u"optimization.mode"), wx.DefaultPosition, wx.DefaultSize,
-            [_(u"pressure  (min dissipation, temp ≤ meantT_max)"),
-             _(u"heat  (min mean temp, dissipation ≤ dissPower_max)")],
-            1, wx.RA_SPECIFY_COLS)
-        self.m_radioMode.SetSelection(0)
-        szOpt.Add(self.m_radioMode, 0, wx.EXPAND|wx.ALL, 10)
-
-        sbCstr = wx.StaticBoxSizer(wx.StaticBox(self.m_panelOpt, wx.ID_ANY, _(u"Constraints && Optimization")), wx.VERTICAL)
-        fgC = wx.FlexGridSizer(0, 2, 6, 10); fgC.AddGrowableCol(1)
-        for lbl, attr, lo, hi, val, inc in [
-            ("meantT_max (K):",        "m_spinMeanTMax",   200, 2000, 340, 5),
-            ("dissPower_max (W):",     "m_spinDissPMax",   0, 1e9, 2800000, 10000),
-            ("Wall thickness (cells):", "m_spinWallCells",  1, 50, 6, 1),
-            ("Unit cell size (cells):", "m_spinUnitCells",  5, 200, 75, 5),
-            ("Overhang angle (°):",    "m_spinAmTheta",    0, 90, 45, 1),
-            ("kbound:",                "m_spinKbound",     0.001, 1.0, 0.08, 0.01),
-        ]:
-            fgC.Add(wx.StaticText(sbCstr.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
-            s = wx.SpinCtrlDouble(sbCstr.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(130,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
-            setattr(self, attr, s); fgC.Add(s, 0, wx.EXPAND)
-        sbCstr.Add(fgC, 0, wx.EXPAND|wx.ALL, 5)
-
-        self.m_chkNoOverhang = wx.CheckBox(sbCstr.GetStaticBox(), wx.ID_ANY, _(u"Enable overhang constraint (no_overhang=true)"))
-        sbCstr.Add(self.m_chkNoOverhang, 0, wx.ALL, 5)
-        szOpt.Add(sbCstr, 0, wx.EXPAND|wx.ALL, 10)
-
-        self.m_btnApplyOpt = wx.Button(self.m_panelOpt, wx.ID_ANY, _(u"Apply settings to model"))
-        szOpt.Add(self.m_btnApplyOpt, 0, wx.ALL, 10)
-        self.m_panelOpt.SetSizer(szOpt); self.m_panelOpt.Layout(); szOpt.Fit(self.m_panelOpt)
-        self.m_simplebook.AddPage(self.m_panelOpt, u"Optimizer", False)
-
-        # =============================================================
-        # PAGE 4 — Optimization Monitor
+        # PAGE 3 — Optimization Monitor
         # =============================================================
         self.m_panelMonitor = wx.Panel(self.m_simplebook)
         szMon = wx.BoxSizer(wx.VERTICAL)
@@ -572,7 +522,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_simplebook.AddPage(self.m_panelMonitor, u"Monitor", False)
 
         # =============================================================
-        # PAGE 5 — Results & Post-Processing
+        # PAGE 4 — Results & Post-Processing
         # =============================================================
         self.m_panelResults = wx.Panel(self.m_simplebook)
         szRes = wx.BoxSizer(wx.VERTICAL)
@@ -620,7 +570,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_simplebook.AddPage(self.m_panelResults, u"Results", False)
 
         # =============================================================
-        # PAGE 6 — Print Preparation (PySLM / server-side)
+        # PAGE 5 — Print Preparation (PySLM / server-side)
         # =============================================================
         self.m_panelPrintPrep = wx.ScrolledWindow(self.m_simplebook, style=wx.VSCROLL)
         self.m_panelPrintPrep.SetScrollRate(0, 10)
@@ -716,7 +666,6 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_spinCellsX.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
         self.m_spinCellsY.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
         self.m_spinCellsZ.Bind(wx.EVT_SPINCTRL, self.onCellsChanged)
-        self.m_btnApplyOpt.Bind(wx.EVT_BUTTON, self.onApplyOpt)
         self.m_btnRunBaseline.Bind(wx.EVT_BUTTON, self.onRunBaseline)
         self.m_btnStartOpt.Bind(wx.EVT_BUTTON, self.onStartOpt)
         self.m_btnExportSTL.Bind(wx.EVT_BUTTON, self.onExportSTL)
@@ -742,7 +691,6 @@ class WorkflowWizardFrame ( wx.Frame ):
     def onLoadJSON( self, event ): event.Skip()
     def onSaveJSON( self, event ): event.Skip()
     def onCellsChanged( self, event ): event.Skip()
-    def onApplyOpt( self, event ): event.Skip()
     def onRunBaseline( self, event ): event.Skip()
     def onStartOpt( self, event ): event.Skip()
     def onExportSTL( self, event ): event.Skip()
@@ -789,11 +737,11 @@ class QuadMeshExportDialog ( wx.Dialog ):
         fgP = wx.FlexGridSizer(0, 2, 6, 12); fgP.AddGrowableCol(1)
         for lbl, attr, lo, hi, val, inc, tip in [
             ("Angular criterion (°):",    "m_spinAngular",    1, 90, 30, 1,
-             "Minimum facet angle for CGAL surface meshing"),
+             "Minimum facet angle for CGAL surface meshing  for CGAL criteria (look on the internet for CGAL criteria)"),
             ("Radius criterion (mm):",    "m_spinRadius",     0.1, 50, 1.0, 0.1,
-             "Maximum surface approximation radius"),
+             "Maximum surface approximation radiusv for CGAL criteria (look on the internet for CGAL criteria). This parameter determines the mesh resolution"),
             ("Distance criterion (mm):",  "m_spinDistance",   0.1, 50, 3.5, 0.1,
-             "Maximum distance from surface"),
+             "Maximum distance from surface for CGAL criteria (look on the internet for CGAL criteria)"),
             ("Target faces:",             "m_spinTargetFaces", 1000, 500000, 50000, 5000,
              "Target number of triangular faces (quad count will differ)"),
             ("Crease angle (°):",         "m_spinCrease",     1, 90, 25, 1,

@@ -1,60 +1,39 @@
 {
-  "geometry": {
-    "size_mm": [
-      25.0,
-      25.0,
-      25.0
-    ],
-    "cells": [
-      25,
-      25,
-      25
-    ],
-    "encap_wall_mm": 2.0
-  },
-  "inlet": {
-    "velocity_magnitude": 0.1,
-    "temperature": 380.0,
-    "window_origin_mm": [
-      1.0,
-      1.0
-    ],
-    "window_size_mm": [
-      1.0,
-      2.0
-    ]
-  },
-  "outlet": {
-    "pressure": 0.0,
-    "window_origin_mm": [
-      12.0,
-      12.0
-    ],
-    "window_size_mm": [
-      1.0,
-      2.0
-    ]
-  },
-  "material": {
-    "Texterior": 270.0,
-    "nu": 1e-06,
-    "rho_fluid": 1000.0
-  },
-  "thermal": {
-    "initial_temperature": 270.0
-  },
-  "optimization": {
-    "mode": "heat",
-    "meantT_max": 303.0,
-    "dissPower_max": 9800.0,
-    "wall": 1,
-    "unit": 5,
-    "am_theta": 45.0,
-    "no_overhang": false,
-    "kbound": 1.0
-  },
-  "run": {
-    "iters": 1,
-    "parallel": 10
-  }
+  "domain_size_x": 15.0,
+  "domain_size_y": 15.0,
+  "domain_size_z": 20.0,
+  "inlet_velocity": 0.1,
+  "inlet_temperature": 380.0,
+  "outlet_pressure": 0.0,
+  "exterior_temperature": 270.0,
+  "initial_temperature": 270.0,
+  "qu": 0.005,
+  "kf": 0.61,
+  "ks": 237.0,
+  "c_p": 4180.0,
+  "rho_s": 0.0027,
+  "darcy_number": 1e-09,
+  "hconv": 1000.0,
+  "encap_wall_mm": 3.0,
+  "meantT_max": 303.0,
+  "dissPower_max": 9800.0,
+  "am_theta": 45.0,
+  "am_L_bridge": 1.5,
+  "no_overhang": false,
+  "am_align_build_to_flow": true,
+  "build_direction": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "max_iterations": 10,
+  "parallel_cores": 10,
+  "kbound": 3.4,
+  "gyroid_wall": 0.2,
+  "gyroid_unit": 1.8,
+  "epsilon": 0.2,
+  "spacing": 7.0,
+  "bake_spacing": 1.4,
+  "opt_mode": "pressure",
+  "opt_method": "MMA"
 }

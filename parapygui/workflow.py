@@ -189,13 +189,9 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinSpacing,     "spacing",      7.0,  1),
             (self.m_spinBakeSpacing, "bake_spacing", 1.4,  1),
             # optimization params
-            (self.m_spinMeanTMax,    "meantT_max",    340,     1),
-            (self.m_spinDissPMax,    "dissPower_max", 2800000, 1),
             (self.m_spinRunMeanTMax, "meantT_max",    303.0,   1),
             (self.m_spinRunDissPMax, "dissPower_max", 9800.0,  1),
-            (self.m_spinAmTheta,   "am_theta",       45,     1),
             (self.m_spinMaxIter,   "max_iterations", 100,    1),
-            (self.m_spinKbound,       "kbound",         0.08,  1),
             (self.m_spinKboundShape,  "kbound",         3.4,   1),
             (self.m_spinRunAmTheta,   "am_theta",       45.0,  1),
             (self.m_spinRunAmLBridge, "am_L_bridge",    1.5,   1),
@@ -210,12 +206,6 @@ class WorkflowWizard(WorkflowWizardFrame):
 
         # cores is a SpinCtrl (int), not SpinCtrlDouble
         self.m_spinCores.SetValue(int(getattr(obj, "parallel_cores", 10)))
-
-        # no_overhang and opt_mode
-        try:
-            self.m_chkNoOverhang.SetValue(bool(getattr(obj, "no_overhang", False)))
-        except Exception:
-            self.m_spinCores.SetValue(10)
 
         # optimization method choice
         try:
@@ -299,13 +289,9 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinEpsilon,     "epsilon",      1),
             (self.m_spinSpacing,     "spacing",      1),
             (self.m_spinBakeSpacing, "bake_spacing", 1),
-            (self.m_spinMeanTMax,    "meantT_max",    1),
-            (self.m_spinDissPMax,    "dissPower_max", 1),
             (self.m_spinRunMeanTMax, "meantT_max",    1),
             (self.m_spinRunDissPMax, "dissPower_max", 1),
-            (self.m_spinAmTheta,   "am_theta",    1),
             (self.m_spinMaxIter,   "max_iterations", 1),
-            (self.m_spinKbound,       "kbound",      1),
             (self.m_spinKboundShape,  "kbound",      1),
             (self.m_spinRunAmTheta,   "am_theta",    1),
             (self.m_spinRunAmLBridge, "am_L_bridge", 1),
@@ -413,21 +399,13 @@ class WorkflowWizard(WorkflowWizardFrame):
                 self.m_spinHconv.SetValue(_mat.get("hconv", 1000.0))
                 self.m_spinEncapWall.SetValue(cfg.get("geometry", {}).get("encap_wall_mm", 3.0))
                 opt = cfg.get("optimization", {})
-                self.m_spinMeanTMax.SetValue(opt.get("meantT_max", 340))
-                self.m_spinDissPMax.SetValue(opt.get("dissPower_max", 2800000))
-                self.m_spinWallCells.SetValue(opt.get("wall", 6))
-                self.m_spinUnitCells.SetValue(opt.get("unit", 75))
-                self.m_spinAmTheta.SetValue(opt.get("am_theta", 45))
-                self.m_spinKbound.SetValue(opt.get("kbound", 0.08))
                 self.m_spinGyroidWall.SetValue(opt.get("gyroid_wall", 0.2))
                 self.m_spinGyroidUnit.SetValue(opt.get("gyroid_unit", 1.8))
                 self.m_spinEpsilon.SetValue(opt.get("epsilon", 0.2))
                 self.m_spinSpacing.SetValue(opt.get("spacing", 7.0))
                 self.m_spinBakeSpacing.SetValue(opt.get("bake_spacing", 1.4))
                 self.m_spinMaxIter.SetValue(cfg.get("run", {}).get("iters", 100))
-                mode = opt.get("mode", "pressure")
-                self.m_radioMode.SetSelection(0 if mode == "pressure" else 1)
-                _run_sel = 0 if mode == "pressure" else 1
+                _run_sel = 0 if opt.get("mode", "pressure") == "pressure" else 1
                 self.m_choiceMode.SetSelection(_run_sel)
                 self.m_panelMeanT.Show(_run_sel == 0)
                 self.m_panelDissPMax.Show(_run_sel == 1)
@@ -447,7 +425,6 @@ class WorkflowWizard(WorkflowWizardFrame):
                     self.m_spinBuildDirX.SetValue(float(_bd[0]))
                     self.m_spinBuildDirY.SetValue(float(_bd[1]))
                     self.m_spinBuildDirZ.SetValue(float(_bd[2]))
-                self.m_chkNoOverhang.SetValue(opt.get("no_overhang", False))
                 _method = opt.get("method", "MMA")
                 _pareto = opt.get("pareto_enabled", False)
                 _om = ["MMA", "L-BFGS-B", "trust-constr"]
@@ -550,15 +527,13 @@ class WorkflowWizard(WorkflowWizardFrame):
         p["thermal.initial_temperature"] = self.m_spinTinitial.GetValue()
 
         # ── Optimization ──
-        mode = "pressure" if self.m_radioMode.GetSelection() == 0 else "heat"
-        p["optimization.mode"] = mode
-        p["optimization.meantT_max"] = self.m_spinMeanTMax.GetValue()
-        p["optimization.dissPower_max"] = self.m_spinDissPMax.GetValue()
-        p["optimization.wall"] = int(self.m_spinWallCells.GetValue())
-        p["optimization.unit"] = int(self.m_spinUnitCells.GetValue())
-        p["optimization.am_theta"] = self.m_spinAmTheta.GetValue()
-        p["optimization.no_overhang"] = self.m_chkNoOverhang.GetValue()
-        p["optimization.kbound"] = self.m_spinKbound.GetValue()
+        _mode_run = ["pressure", "heat"][max(self.m_choiceMode.GetCurrentSelection(), 0)]
+        p["optimization.mode"] = _mode_run
+        if _mode_run == "pressure":
+            p["optimization.meantT_max"] = self.m_spinRunMeanTMax.GetValue()
+        else:
+            p["optimization.dissPower_max"] = self.m_spinRunDissPMax.GetValue()
+        p["optimization.kbound"] = self.m_spinKboundShape.GetValue()
         p["optimization.gyroid_wall"] = self.m_spinGyroidWall.GetValue()
         p["optimization.gyroid_unit"] = self.m_spinGyroidUnit.GetValue()
         p["optimization.epsilon"] = self.m_spinEpsilon.GetValue()
@@ -568,18 +543,7 @@ class WorkflowWizard(WorkflowWizardFrame):
         p["optimization.method"] = "MMA" if _om_label == "pareto" else _om_label
         p["optimization.pareto_enabled"] = (_om_label == "pareto")
 
-        # ── Run Settings mode (page-0 controls override page-3 values) ──
-        _mode_run = ["pressure", "heat"][max(self.m_choiceMode.GetCurrentSelection(), 0)]
-        p["optimization.mode"] = _mode_run
-        if _mode_run == "pressure":
-            p["optimization.meantT_max"] = self.m_spinRunMeanTMax.GetValue()
-        else:
-            p["optimization.dissPower_max"] = self.m_spinRunDissPMax.GetValue()
-
-        # ── Shape kbound override ──
-        p["optimization.kbound"] = self.m_spinKboundShape.GetValue()
-
-        # ── Manufacturability (page-0 mfg controls override page-3 values) ──
+        # ── Manufacturability ──
         _mfg_on = (self.m_radioMfg.GetSelection() == 0)
         p["optimization.no_overhang"] = not _mfg_on
         if _mfg_on:
@@ -694,11 +658,7 @@ class WorkflowWizard(WorkflowWizardFrame):
                     "darcy_number": (self.m_spinDa,     1),
                     "hconv":        (self.m_spinHconv,  1),
                     "encap_wall_mm": (self.m_spinEncapWall, 1),
-                    "meantT_max": (self.m_spinMeanTMax, 1),
-                    "dissPower_max": (self.m_spinDissPMax, 1),
-                    "am_theta": (self.m_spinAmTheta, 1),
                     "max_iterations": (self.m_spinMaxIter, 1),
-                    "kbound":       (self.m_spinKbound,      1),
                     "gyroid_wall":  (self.m_spinGyroidWall,  1),
                     "gyroid_unit":  (self.m_spinGyroidUnit,  1),
                     "epsilon":      (self.m_spinEpsilon,     1),
@@ -711,8 +671,6 @@ class WorkflowWizard(WorkflowWizardFrame):
                 if "parallel_cores" in cfg:
                     self.m_spinCores.SetValue(int(cfg["parallel_cores"]))
                 if "opt_mode" in cfg:
-                    self.m_radioMode.SetSelection(
-                        0 if cfg["opt_mode"] == "pressure" else 1)
                     _run_sel = 0 if cfg["opt_mode"] == "pressure" else 1
                     self.m_choiceMode.SetSelection(_run_sel)
                     self.m_panelMeanT.Show(_run_sel == 0)
@@ -1169,15 +1127,7 @@ class WorkflowWizard(WorkflowWizardFrame):
             self.m_btnStartOpt.Enable(True)
 
     # =================================================================
-    # Page 3: Apply optimizer settings
-    # =================================================================
-
-    def onApplyOpt(self, event):
-        self._write_gui_to_parapy()
-        self.m_statusLabel.SetLabel("Optimizer settings applied to model.")
-
-    # =================================================================
-    # Page 5: Export hooks
+    # Page 4: Export hooks
     # =================================================================
 
     def onExportSTL(self, event):
