@@ -536,7 +536,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         sbFin.Add(fgF, 0, wx.EXPAND|wx.ALL, 5)
         szRes.Add(sbFin, 0, wx.EXPAND|wx.ALL, 10)
         szBtns = wx.BoxSizer(wx.HORIZONTAL)
-        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Export && Download STL"))
+        self.m_btnExportSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"STL Export…"))
         szBtns.Add(self.m_btnExportSTL, 0, wx.ALL, 5)
         self.m_btnViewSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"View STL (PyVista)"))
         self.m_btnViewSTL.Enable(False)
@@ -916,3 +916,155 @@ class QuadMeshExportDialog ( wx.Dialog ):
     def onViewPyVista( self, event ): event.Skip()
     def onDownloadOBJ( self, event ): event.Skip()
     def onDownloadSTEP( self, event ): event.Skip()
+
+
+###########################################################################
+## Class STLExportDialog
+###########################################################################
+
+class STLExportDialog ( wx.Dialog ):
+    """Popup dialog to configure, run and download STL export from the server."""
+
+    def __init__( self, parent ):
+        wx.Dialog.__init__( self, parent, id=wx.ID_ANY,
+            title=_(u"STL Export"),
+            size=wx.Size(760, 460),
+            style=wx.DEFAULT_DIALOG_STYLE|wx.RESIZE_BORDER )
+
+        self.SetSizeHints(wx.Size(520, 360))
+        mono = wx.Font(9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+
+        splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE)
+
+        # ── LEFT: parameters ──────────────────────────────────────────────────
+        leftPanel = wx.Panel(splitter)
+        szLeft = wx.BoxSizer(wx.VERTICAL)
+
+        # Export parameters box
+        sbParams = wx.StaticBoxSizer(
+            wx.StaticBox(leftPanel, wx.ID_ANY, _(u"Export Parameters (gyroid_to_stl.py)")), wx.VERTICAL)
+        fgP = wx.FlexGridSizer(0, 2, 6, 12)
+        fgP.AddGrowableCol(1)
+
+        fgP.Add(wx.StaticText(sbParams.GetStaticBox(), wx.ID_ANY, _(u"Resolution (mm):")),
+                0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinRes = wx.SpinCtrlDouble(
+            sbParams.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(120, -1), wx.SP_ARROW_KEYS, 0.05, 5.0, 0.4, 0.05)
+        self.m_spinRes.SetDigits(3)
+        self.m_spinRes.SetToolTip(_(u"Marching-cubes mesh resolution in mm (--res); lower = finer / slower"))
+        fgP.Add(self.m_spinRes, 0, wx.EXPAND)
+
+        fgP.Add(wx.StaticText(sbParams.GetStaticBox(), wx.ID_ANY, _(u"Target faces:")),
+                0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinTargetFaces = wx.SpinCtrlDouble(
+            sbParams.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(120, -1), wx.SP_ARROW_KEYS, 10000, 50000000, 5000000, 500000)
+        self.m_spinTargetFaces.SetToolTip(_(u"Target number of triangular faces (--target-faces); server default: 5 million"))
+        fgP.Add(self.m_spinTargetFaces, 0, wx.EXPAND)
+
+        sbParams.Add(fgP, 0, wx.EXPAND|wx.ALL, 5)
+
+        szOut = wx.BoxSizer(wx.HORIZONTAL)
+        szOut.Add(wx.StaticText(sbParams.GetStaticBox(), wx.ID_ANY, _(u"Output name (optional):")),
+                  0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 6)
+        self.m_txtOutFile = wx.TextCtrl(sbParams.GetStaticBox(), wx.ID_ANY, u"")
+        self.m_txtOutFile.SetToolTip(_(u"Override server output filename (--out); leave blank for default"))
+        szOut.Add(self.m_txtOutFile, 1, wx.EXPAND)
+        sbParams.Add(szOut, 0, wx.EXPAND|wx.ALL, 5)
+
+        self.m_chkFluidSTL = wx.CheckBox(
+            sbParams.GetStaticBox(), wx.ID_ANY, _(u"Export fluid domain STL (--fluid-stl)"))
+        self.m_chkFluidSTL.SetToolTip(
+            _(u"Also generate an STL of the fluid domain — useful to verify passages are open"))
+        sbParams.Add(self.m_chkFluidSTL, 0, wx.ALL, 5)
+
+        szLeft.Add(sbParams, 0, wx.EXPAND|wx.ALL, 10)
+
+        # Download section
+        sbDl = wx.StaticBoxSizer(
+            wx.StaticBox(leftPanel, wx.ID_ANY, _(u"Download (download-stl)")), wx.VERTICAL)
+
+        szWhich = wx.BoxSizer(wx.HORIZONTAL)
+        szWhich.Add(wx.StaticText(sbDl.GetStaticBox(), wx.ID_ANY, _(u"Files:")),
+                    0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 8)
+        self.m_radioDownload = wx.RadioBox(
+            sbDl.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.DefaultSize,
+            [u"all", u"lattice", u"encap", u"surface"], 4, wx.RA_SPECIFY_COLS)
+        self.m_radioDownload.SetSelection(0)
+        self.m_radioDownload.SetToolTip(_(u"Which STL file(s) to download:\n"
+            u"  all — lattice + encap + surface\n"
+            u"  lattice — gyroid lattice mesh\n"
+            u"  encap — encapsulation shell\n"
+            u"  surface — raw gyroid surface"))
+        szWhich.Add(self.m_radioDownload, 0)
+        sbDl.Add(szWhich, 0, wx.ALL, 5)
+
+        self.m_btnDownloadSTL = wx.Button(sbDl.GetStaticBox(), wx.ID_ANY, _(u"Download STL"))
+        self.m_btnDownloadSTL.Enable(False)
+        sbDl.Add(self.m_btnDownloadSTL, 0, wx.LEFT|wx.BOTTOM, 5)
+
+        szLeft.Add(sbDl, 0, wx.EXPAND|wx.ALL, 10)
+        leftPanel.SetSizer(szLeft)
+
+        # ── RIGHT: action buttons + log ───────────────────────────────────────
+        rightPanel = wx.Panel(splitter)
+        szRight = wx.BoxSizer(wx.VERTICAL)
+
+        szActions = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnRunSTL = wx.Button(rightPanel, wx.ID_ANY, _(u"Run STL Export"))
+        szActions.Add(self.m_btnRunSTL, 0, wx.ALL, 5)
+        self.m_btnStopSTL = wx.Button(rightPanel, wx.ID_ANY, _(u"Stop"))
+        self.m_btnStopSTL.Enable(False)
+        szActions.Add(self.m_btnStopSTL, 0, wx.ALL, 5)
+        szRight.Add(szActions, 0)
+
+        self.m_txtSTLLog = wx.TextCtrl(
+            rightPanel, wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.DefaultSize,
+            wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL)
+        self.m_txtSTLLog.SetFont(mono)
+        szRight.Add(self.m_txtSTLLog, 1, wx.EXPAND|wx.ALL, 5)
+
+        self.m_statusSTL = wx.StaticText(
+            rightPanel, wx.ID_ANY,
+            _(u"Ready — configure parameters and click Run STL Export."))
+        self.m_statusSTL.SetForegroundColour(wx.Colour(120, 120, 120))
+        szRight.Add(self.m_statusSTL, 0, wx.EXPAND|wx.LEFT|wx.RIGHT|wx.BOTTOM, 5)
+
+        rightPanel.SetSizer(szRight)
+
+        # ── Assemble ──────────────────────────────────────────────────────────
+        splitter.SplitVertically(leftPanel, rightPanel, 330)
+        splitter.SetMinimumPaneSize(200)
+
+        szMain = wx.BoxSizer(wx.VERTICAL)
+        szMain.Add(splitter, 1, wx.EXPAND)
+        self.SetSizer(szMain)
+        self.Layout()
+        self.Centre(wx.BOTH)
+
+        self.m_btnRunSTL.Bind(wx.EVT_BUTTON, self.onRunSTL)
+        self.m_btnStopSTL.Bind(wx.EVT_BUTTON, self.onStopSTL)
+        self.m_btnDownloadSTL.Bind(wx.EVT_BUTTON, self.onDownloadSTL)
+
+    def get_extra_args(self):
+        """Build CLI args list for the stl-export gRPC call."""
+        args = ["--res", str(self.m_spinRes.GetValue())]
+        args += ["--target-faces", str(int(self.m_spinTargetFaces.GetValue()))]
+        out = self.m_txtOutFile.GetValue().strip()
+        if out:
+            args += ["--out", out]
+        if self.m_chkFluidSTL.GetValue():
+            args.append("--fluid-stl")
+        return args
+
+    def get_download_which(self):
+        """Return selected download target: 'all', 'lattice', 'encap', or 'surface'."""
+        return ["all", "lattice", "encap", "surface"][self.m_radioDownload.GetSelection()]
+
+    def __del__( self ): pass
+    def onRunSTL( self, event ): event.Skip()
+    def onStopSTL( self, event ): event.Skip()
+    def onDownloadSTL( self, event ): event.Skip()

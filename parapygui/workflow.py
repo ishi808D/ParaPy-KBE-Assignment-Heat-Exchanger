@@ -1131,81 +1131,149 @@ class WorkflowWizard(WorkflowWizardFrame):
     # =================================================================
 
     def onExportSTL(self, event):
-        """Download existing STL files from the container to outputs/."""
-        out_dir = str(_OUT_DIR)
-        _OUT_DIR.mkdir(parents=True, exist_ok=True)
-        self.m_btnExportSTL.Enable(False)
-        self.m_statusLabel.SetLabel("Downloading STL…")
-        threading.Thread(target=self._stl_download_worker,
-                         args=(out_dir,), daemon=True).start()
+        """Open the STL Export dialog."""
+        import threading as _th
+        from GUIwxformbuilder import STLExportDialog
 
-    def _stl_download_worker(self, out_dir):
-        saved = []
+        dlg = STLExportDialog(self)
+        dlg._stl_stop = _th.Event()
 
-        # ── 1. Start a fresh STL export ──────────────────────────────────────
-        wx.CallAfter(self._safe_status, "Running STL export on server…")
+        def _run(e):
+            dlg._stl_stop.clear()
+            try:
+                dlg.m_btnRunSTL.Enable(False)
+                dlg.m_btnStopSTL.Enable(True)
+                dlg.m_btnDownloadSTL.Enable(False)
+            except RuntimeError:
+                return
+            extra_args = dlg.get_extra_args()
+            _th.Thread(target=self._stl_run_worker,
+                       args=(dlg, extra_args), daemon=True).start()
+
+        def _stop(e):
+            dlg._stl_stop.set()
+
+        def _download(e):
+            which = dlg.get_download_which()
+            try:
+                dlg.m_btnDownloadSTL.Enable(False)
+            except RuntimeError:
+                return
+            _th.Thread(target=self._stl_dl_worker,
+                       args=(dlg, which), daemon=True).start()
+
+        dlg.m_btnRunSTL.Bind(wx.EVT_BUTTON, _run)
+        dlg.m_btnStopSTL.Bind(wx.EVT_BUTTON, _stop)
+        dlg.m_btnDownloadSTL.Bind(wx.EVT_BUTTON, _download)
+
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def _stl_run_worker(self, dlg, extra_args):
+        """Background: trigger STL export on server and stream output to dialog log."""
+        def log(msg):
+            try:
+                wx.CallAfter(dlg.m_txtSTLLog.AppendText, msg + "\n")
+                wx.CallAfter(dlg.m_statusSTL.SetLabel, msg[:120])
+            except RuntimeError:
+                pass
+
+        def set_buttons(run_on, stop_on):
+            try:
+                wx.CallAfter(dlg.m_btnRunSTL.Enable, run_on)
+                wx.CallAfter(dlg.m_btnStopSTL.Enable, stop_on)
+            except RuntimeError:
+                pass
+
+        # 1. Start export on server
+        log("── Starting STL export on server (stl-export)…")
+        if extra_args:
+            log(f"   args: {' '.join(extra_args)}")
         try:
-            resp = self._grpc.start_stl()
-            wx.CallAfter(self._safe_status, f"STL export started: {resp.message}")
+            resp = self._grpc.start_stl(extra_args)
+            log(f"Server: {resp.message}")
             if not resp.success:
-                wx.CallAfter(self._safe_status,
-                             f"STL export failed to start: {resp.message}")
-                wx.CallAfter(self.m_btnExportSTL.Enable, True)
+                log("ERROR: Server refused to start export.")
+                set_buttons(True, False)
                 return
         except Exception as e:
-            wx.CallAfter(self._safe_status, f"STL export error: {e}")
-            wx.CallAfter(self.m_btnExportSTL.Enable, True)
+            log(f"ERROR: {e}")
+            set_buttons(True, False)
             return
 
-        # ── 2. Stream output until the process finishes ───────────────────────
+        # 2. Stream output (stl-stream) until done or stopped
         had_error = False
+        log("── Streaming export output…")
         try:
             for line in self._grpc.stream_stl_output():
-                ts = time.strftime("%H:%M:%S",
-                                   time.localtime(line.timestamp_ms / 1000))
-                wx.CallAfter(self._safe_status, f"STL: {line.line[:80]}")
+                if dlg._stl_stop.is_set():
+                    log("── Monitoring stopped by user (server export may still be running).")
+                    set_buttons(True, False)
+                    return
+                ts = time.strftime("%H:%M:%S", time.localtime(line.timestamp_ms / 1000))
+                log(f"[{ts}] {line.line}")
                 if line.line.startswith("ERROR:"):
                     had_error = True
         except grpc.RpcError:
             pass  # stream ended normally
 
         if had_error:
-            wx.CallAfter(self._safe_status, "STL export failed — see server logs.")
-            wx.CallAfter(self.m_btnExportSTL.Enable, True)
+            log("── Export finished with errors — check log above.")
+            set_buttons(True, False)
             return
 
-        # ── 3. Download all generated STL files ───────────────────────────────
-        wx.CallAfter(self._safe_status, "Downloading STL files…")
-        for which in ["lattice", "encap", "surface"]:
+        log("── Export complete. Select files below and click Download STL.")
+        set_buttons(True, False)
+        try:
+            wx.CallAfter(dlg.m_btnDownloadSTL.Enable, True)
+        except RuntimeError:
+            pass
+
+    def _stl_dl_worker(self, dlg, which):
+        """Background: download STL file(s) from server to outputs/."""
+        def log(msg):
             try:
-                chunks = self._grpc.download_stl(which)
+                wx.CallAfter(dlg.m_txtSTLLog.AppendText, msg + "\n")
+                wx.CallAfter(dlg.m_statusSTL.SetLabel, msg[:120])
+            except RuntimeError:
+                pass
+
+        _OUT_DIR.mkdir(parents=True, exist_ok=True)
+        saved = []
+
+        targets = ["lattice", "encap", "surface"] if which == "all" else [which]
+        log(f"── Downloading: {', '.join(targets)}…")
+
+        for target in targets:
+            try:
+                chunks = self._grpc.download_stl(target)
                 fh, path = None, None
-                last_chunk = None
                 for chunk in chunks:
                     if not path:
-                        fname = chunk.filename if chunk.filename else f"gyroid_{which}.stl"
-                        path = Path(out_dir) / fname
+                        fname = chunk.filename if chunk.filename else f"gyroid_{target}.stl"
+                        path = _OUT_DIR / fname
                         fh = open(path, "wb")
                     fh.write(chunk.data)
-                    last_chunk = chunk
                 if fh:
                     fh.close()
                     saved.append(str(path))
-                    wx.CallAfter(self._safe_status,
-                                 f"Downloaded: {last_chunk.filename}")
+                    log(f"Saved: {path.name}")
             except grpc.RpcError:
-                pass  # this variant doesn't exist — skip silently
+                log(f"Note: '{target}' not available from server.")
 
-        wx.CallAfter(self.m_btnExportSTL.Enable, True)
+        try:
+            wx.CallAfter(dlg.m_btnDownloadSTL.Enable, True)
+        except RuntimeError:
+            pass
+
         if saved:
             self._last_stl_paths = saved
             wx.CallAfter(self.m_btnViewSTL.Enable, True)
             wx.CallAfter(self._safe_status,
-                         f"Saved {len(saved)} STL file(s) — opening viewer…")
-            wx.CallAfter(self._auto_view_stl)
+                         f"Saved {len(saved)} STL file(s) to outputs/")
+            log(f"── Done. {len(saved)} file(s) saved to outputs/")
         else:
-            wx.CallAfter(self._safe_status,
-                         "No STL files downloaded — check server logs.")
+            log("── No files downloaded — verify the export completed without errors.")
 
     def onQuadMeshExport(self, event):
         """Open the Quad Mesh → STEP Export dialog."""
