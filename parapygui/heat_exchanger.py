@@ -39,21 +39,21 @@ from parapy.core import Input, Attribute, Part, action
 from parapy.exchange import STLReader
 from parapy.geom import GeomBase
 
-from .encapsulation import Encapsulation
-from .environment import HeatExchangerEnvironment
-from .fluid import FluidElement
-from .lattice import LatticeFormulation, TPMSFrequencyField
-from .objectives import Objectives, ManufacturingConstraintSet
-from .solidity import SemiEmpirical
-from .simulation import SimulationConnector
-from .geometry_export import GeometryExportService
-from .loader import Loader
-from .validators import validate_heat_exchanger
-from .gyroid import GyroidMesh
-from .manufacturability import ManufacturabilityAnalysis
-from .pyslm_analysis import PySLMAnalysis
-from .optimization_history import OptimizationHistory
-from .reporting import ReportGenerator
+from encapsulation import Encapsulation
+from environment import HeatExchangerEnvironment
+from fluid import FluidElement
+from lattice import LatticeFormulation, TPMSFrequencyField
+from objectives import Objectives, ManufacturingConstraintSet
+from solidity import SemiEmpirical
+from simulation import SimulationConnector
+from geometry_export import GeometryExportService
+from loader import Loader
+from validators import validate_heat_exchanger
+from gyroid import GyroidMesh
+from manufacturability import ManufacturabilityAnalysis
+from pyslm_analysis import PySLMAnalysis
+from optimization_history import OptimizationHistory
+from reporting import ReportGenerator
 
 
 class HeatExchanger(GeomBase):
@@ -197,7 +197,7 @@ class HeatExchanger(GeomBase):
     @action(label="Open Workflow Wizard")
     def edit_environment(self):
         import wx
-        from .workflow import WorkflowWizard
+        from workflow import WorkflowWizard
         app = wx.GetApp()
         parent = app.GetTopWindow()
         frm = WorkflowWizard(parent, parapy_obj=self)

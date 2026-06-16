@@ -50,8 +50,8 @@ dfam = ["PythonSLM"]
 # they are also declared in parapygui/pyproject.toml for standalone use)
 # ---------------------------------------------------------------------------
 [project.scripts]
-kbe-web = "parapygui.webapp:app"
-kbe-gui = "parapygui.main:main"
+kbe-web = "webapp:app"
+kbe-gui = "main:main"
 
 # ---------------------------------------------------------------------------
 # uv source overrides

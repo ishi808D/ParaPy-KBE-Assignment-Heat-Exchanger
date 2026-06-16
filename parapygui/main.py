@@ -28,7 +28,7 @@ from pathlib import Path
 
 def _build(config_path: str | None):
     """Instantiate the root HeatExchanger."""
-    from parapygui.heat_exchanger import HeatExchanger
+    from heat_exchanger import HeatExchanger
 
     if config_path and Path(config_path).is_file():
         print(f"Loading config: {config_path}")

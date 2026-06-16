@@ -13,7 +13,7 @@ import time
 
 import wx
 
-from .GUIwxformbuilder import WorkflowWizardFrame
+from GUIwxformbuilder import WorkflowWizardFrame
 
 # gRPC imports (live at repo root)
 import sys, os
@@ -1224,7 +1224,7 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onQuadMeshExport(self, event):
         """Open the Quad Mesh → STEP Export dialog."""
-        from .GUIwxformbuilder import QuadMeshExportDialog
+        from GUIwxformbuilder import QuadMeshExportDialog
 
         dlg = QuadMeshExportDialog(self)
 
@@ -1515,8 +1515,8 @@ class WorkflowWizard(WorkflowWizardFrame):
                              edge_color="gray", opacity=0.9)
             plotter.add_axes(); plotter.show_grid()
             plotter.show(interactive=True)
-        except ImportError:
-            wx.MessageBox("pip install pyvista", "PyVista", wx.OK|wx.ICON_WARNING)
+        except ImportError as e:
+            wx.MessageBox(f"Failed to import PyVista: {e}", "PyVista", wx.OK|wx.ICON_WARNING)
         except Exception as e:
             wx.MessageBox(f"Failed: {e}", "Error", wx.OK|wx.ICON_ERROR)
 

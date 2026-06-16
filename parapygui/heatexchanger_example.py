@@ -141,7 +141,7 @@ class HeatExchanger(GeomBase):
         The wizard receives `self` (this ParaPy object) so it can
         read Attributes and write back to Inputs."""
         import wx
-        from .workflow import WorkflowWizard
+        from workflow import WorkflowWizard
 
         app = wx.GetApp()
         parent = app.GetTopWindow()
