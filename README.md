@@ -42,6 +42,7 @@ uv run python -m main # For normal GUI use
 uv run python -m main --config inputs/requirements.json # For json-based use from the CLI
 uv run python -m main --no-gui # for running the code in headless mode
 ```
+Then in the GUI, inside the Heat Exchanger class open the Workflow Wizard
 
 ## Working inside the container (for debugging)
 

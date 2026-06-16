@@ -148,6 +148,11 @@ class OptimizationHistory(Base):
                                  "T_out", "Tout", "temperature", "T_outlet")
 
     @Attribute
+    def mean_temperature(self) -> list[float]:
+        return self.series_fuzzy("meantT", "meanT", "MeanT", "mean_temperature",
+                                 "constraint", "g_meanT", "T_mean")
+
+    @Attribute
     def mechanical_dissipation(self) -> list[float]:
         return self.series_fuzzy("mechanical_dissipation", "mech_dissipation",
                                  "dissipation", "power", "pressure_drop", "dp")
@@ -155,6 +160,10 @@ class OptimizationHistory(Base):
     @Attribute
     def objective(self) -> list[float]:
         return self.series_fuzzy("objective", "obj", "cost", "J", "loss")
+
+    @Attribute
+    def g_oh(self) -> list[float]:
+        return self.series_fuzzy("g_oh", "G_oh", "overhang_constraint", "overhang")
 
     @Attribute
     def latest(self) -> dict:

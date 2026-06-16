@@ -35,6 +35,7 @@ class ReportGenerator(Base):
     opt_iters: list = Input([])
     opt_objs:  list = Input([])
     opt_cstrs: list = Input([])
+    opt_g_oh:  list = Input([])
 
     # Full history table from gRPC GetHistory (preferred when available)
     history_columns: list = Input([])
@@ -68,6 +69,8 @@ class ReportGenerator(Base):
                 self._page_convergence(plt, pdf)
             elif self.opt_iters:
                 self._page_convergence_from_lists(plt, pdf)
+            elif self.history_rows:
+                self._page_convergence_from_rows(plt, pdf)
 
         return self.pdf_path
 
@@ -196,9 +199,11 @@ class ReportGenerator(Base):
         """Convergence plots built from the wizard's live-parsed data."""
         if not self.opt_iters:
             return
+        _nz = lambda s: s if s and any(v != 0.0 for v in s) else []
         panels = [
-            (self.opt_objs,  "Objective",  "tab:blue"),
-            (self.opt_cstrs, "Constraint", "tab:red"),
+            (_nz(self.opt_objs),  "Objective",                    "tab:blue"),
+            (_nz(self.opt_cstrs), "Mean Temperature Constraint",  "tab:red"),
+            (_nz(self.opt_g_oh),  "Overhang Constraint (g_oh)",   "tab:orange"),
         ]
         panels = [(s, l, c) for s, l, c in panels if s]
         if not panels:
@@ -206,6 +211,7 @@ class ReportGenerator(Base):
         fig, axes = plt.subplots(len(panels), 1,
                                  figsize=(8.27, 3.5 * len(panels)),
                                  squeeze=False)
+        fig.suptitle("Convergence History", fontsize=13, fontweight="bold")
         for ax, (series, label, colour) in zip(axes[:, 0], panels):
             ax.plot(self.opt_iters[:len(series)], series,
                     "-o", ms=3, color=colour)
@@ -213,6 +219,7 @@ class ReportGenerator(Base):
             ax.set_ylabel(label)
             ax.set_title(f"{label} Convergence")
             ax.grid(True, alpha=0.3)
+            ax.margins(y=0.1)
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
@@ -222,13 +229,17 @@ class ReportGenerator(Base):
         it = getattr(h, "iterations", [])
         if not it:
             return None
-        outT = getattr(h, "outlet_temperature", [])
-        mech = getattr(h, "mechanical_dissipation", [])
-        obj  = getattr(h, "objective", [])
+        outT  = getattr(h, "outlet_temperature", [])
+        meanT = getattr(h, "mean_temperature", [])
+        mech  = getattr(h, "mechanical_dissipation", [])
+        obj   = getattr(h, "objective", [])
+        goh   = getattr(h, "g_oh", [])
         panels = [(s, l, c) for s, l, c in [
-            (outT, "Outlet Temperature [K]",      "tab:blue"),
-            (mech, "Mechanical Dissipation [W]",  "tab:red"),
-            (obj,  "Objective [-]",                "tab:green"),
+            (outT,  "Outlet Temperature [K]",        "tab:blue"),
+            (meanT, "Mean Temperature [K]",           "tab:cyan"),
+            (mech,  "Mechanical Dissipation [W]",     "tab:red"),
+            (obj,   "Objective [-]",                  "tab:green"),
+            (goh,   "Overhang Constraint g_oh [-]",   "tab:orange"),
         ] if s]
         if not panels:
             return None
@@ -241,8 +252,61 @@ class ReportGenerator(Base):
             ax.set_ylabel(label)
             ax.set_title(label.split(" [")[0] + " Convergence")
             ax.grid(True, alpha=0.3)
+            ax.margins(y=0.1)
         fig.tight_layout()
         return fig
+
+    def _page_convergence_from_rows(self, plt, pdf):
+        """Convergence plots extracted from gRPC history rows (fallback path)."""
+        if not self.history_rows:
+            return
+
+        _DISSIP_KEYS = ["DissPower", "dissPower", "Disspower", "dissipation",
+                        "objective", "obj"]
+        _MEANT_KEYS  = ["meantT", "meanT", "MeanT", "constraint", "g_meanT"]
+        _G_OH_KEYS   = ["g_oh", "G_oh"]
+
+        def _extract(rows, keys):
+            vals = []
+            for row in rows:
+                for k in keys:
+                    v = row.get(k)
+                    if v not in (None, ""):
+                        try:
+                            vals.append(float(v)); break
+                        except (TypeError, ValueError):
+                            pass
+            return vals
+
+        iters = list(range(len(self.history_rows)))
+        objs  = _extract(self.history_rows, _DISSIP_KEYS)
+        cstrs = _extract(self.history_rows, _MEANT_KEYS)
+        gohs  = _extract(self.history_rows, _G_OH_KEYS)
+
+        _nz = lambda s: s if s and any(v != 0.0 for v in s) else []
+        panels = [
+            (_nz(objs),  "Objective",                    "tab:blue"),
+            (_nz(cstrs), "Mean Temperature Constraint",  "tab:red"),
+            (_nz(gohs),  "Overhang Constraint (g_oh)",   "tab:orange"),
+        ]
+        panels = [(s, l, c) for s, l, c in panels if s]
+        if not panels:
+            return
+
+        fig, axes = plt.subplots(len(panels), 1,
+                                 figsize=(8.27, 3.5 * len(panels)),
+                                 squeeze=False)
+        fig.suptitle("Convergence History (Server)", fontsize=13, fontweight="bold")
+        for ax, (series, label, colour) in zip(axes[:, 0], panels):
+            ax.plot(iters[:len(series)], series, "-o", ms=3, color=colour)
+            ax.set_xlabel("Iteration")
+            ax.set_ylabel(label)
+            ax.set_title(f"{label} Convergence")
+            ax.grid(True, alpha=0.3)
+            ax.margins(y=0.1)
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
 
     # ── helpers ───────────────────────────────────────────────────────
 

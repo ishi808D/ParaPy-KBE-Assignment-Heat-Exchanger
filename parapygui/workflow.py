@@ -818,7 +818,7 @@ class WorkflowWizard(WorkflowWizardFrame):
             Nu_ref = obj.nusselt_number_empirical
             f_ref  = obj.friction_empirical
             Dh     = obj.encapsulation.hydraulic_diameter
-            kf     = obj.fluid.thermal_conductivity
+            kf     = obj.fluid.conductivity
         except AttributeError as e:
             self.m_statusLabel.SetLabel(f"Missing attribute: {e}"); return
 
