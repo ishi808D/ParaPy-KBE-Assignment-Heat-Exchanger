@@ -631,6 +631,8 @@ class WorkflowWizard(WorkflowWizardFrame):
             self._compute_sizing()
         elif self._page == 3:
             self._write_gui_to_parapy()
+        elif self._page == 5:
+            self._populate_extrap_refs()
         self._go_to(self._page + 1)
 
     def _set_sim_running(self, running):
@@ -787,14 +789,58 @@ class WorkflowWizard(WorkflowWizardFrame):
             self.m_statusLabel.SetLabel("No ParaPy object."); return
         try:
             self.m_txtReynolds.SetValue(f"{obj.reynolds_number:.1f}")
-            self.m_txtSolidity.SetValue(f"{obj.solidity:.4f}")
-            self.m_txtNusselt.SetValue(f"{obj.nusselt_number:.2f}")
-            self.m_txtFriction.SetValue(f"{obj.friction_factor:.5f}")
-            self.m_txtPressureDrop.SetValue(f"{obj.pressure_drop:.2f}")
-            self.m_txtDh.SetValue(f"{obj.hydraulic_diameter:.4f}")
+            self.m_txtNusselt.SetValue(f"{obj.nusselt_number_empirical:.2f}")
+            self.m_txtFriction.SetValue(f"{obj.friction_empirical:.5f}")
+            self.m_txtPressureDrop.SetValue(f"{obj.pressure_drop_empirical:.2f}")
+            self.m_txtDh.SetValue(f"{obj.encapsulation.hydraulic_diameter:.4f}")
         except AttributeError as e:
             self.m_statusLabel.SetLabel(f"Missing attribute: {e}"); return
         self.m_statusLabel.SetLabel("Sizing computed.")
+
+    def _populate_extrap_refs(self):
+        obj = self.parapy_obj
+        if not obj:
+            return
+        try:
+            self.m_txtExtrapReRef.SetValue(f"{obj.reynolds_number:.1f}")
+            self.m_txtExtrapNuRef.SetValue(f"{obj.nusselt_number_empirical:.4f}")
+            self.m_txtExtrapFRef.SetValue(f"{obj.friction_empirical:.5f}")
+            self.m_txtExtrapDh.SetValue(f"{obj.encapsulation.hydraulic_diameter:.6f}")
+        except AttributeError as e:
+            self.m_statusLabel.SetLabel(f"Extrap ref error: {e}")
+
+    def onComputeExtrapolation(self, event):
+        obj = self.parapy_obj
+        if not obj:
+            self.m_statusLabel.SetLabel("No ParaPy object."); return
+        try:
+            Re_ref = obj.reynolds_number
+            Nu_ref = obj.nusselt_number_empirical
+            f_ref  = obj.friction_empirical
+            Dh     = obj.encapsulation.hydraulic_diameter
+            kf     = obj.fluid.thermal_conductivity
+        except AttributeError as e:
+            self.m_statusLabel.SetLabel(f"Missing attribute: {e}"); return
+
+        n     = self.m_spinExtrapN.GetValue()
+        r     = self.m_spinExtrapR.GetValue()
+        f_inf = self.m_spinExtrapFInf.GetValue()
+        Re_t  = self.m_spinExtrapReTarget.GetValue()
+
+        if Re_ref <= 0:
+            self.m_statusLabel.SetLabel("Re_ref is zero — run sizing first."); return
+
+        ratio  = Re_t / Re_ref
+        Nu_ext = Nu_ref * ratio ** n
+        f_ext  = f_inf + (f_ref - f_inf) * ratio ** r
+        h_ext  = Nu_ext * kf / Dh
+
+        self.m_txtExtrapNu.SetValue(f"{Nu_ext:.4f}")
+        self.m_txtExtrapF.SetValue(f"{f_ext:.5f}")
+        self.m_txtExtrapH.SetValue(f"{h_ext:.2f}")
+        self.m_txtExtrapNuRatio.SetValue(f"{Nu_ext / Nu_ref:.4f}")
+        self.m_txtExtrapFRatio.SetValue(f"{f_ext / f_ref:.4f}" if f_ref else "—")
+        self.m_statusLabel.SetLabel(f"Extrapolated to Re = {Re_t:.0f}.")
 
     # =================================================================
     # Page 2: Baseline simulation (real gRPC)

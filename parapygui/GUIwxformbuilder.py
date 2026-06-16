@@ -21,7 +21,7 @@ from info_button_templates import add_info_tip, add_info_button
 class WorkflowWizardFrame ( wx.Frame ):
     """Wizard popup launched from ParaPy @action. Receives the ParaPy object."""
 
-    NUM_PAGES = 6
+    NUM_PAGES = 7
     PAGE_TITLES = [
         u"Step 1: Geometry && Boundary Conditions",
         u"Step 2: Semi-Empirical Sizing",
@@ -29,6 +29,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         u"Step 4: Optimization Monitor",
         u"Step 5: Results && Post-Processing",
         u"Step 6: Print Preparation (PySLM)",
+        u"Step 7: Extrapolation to Higher Reynolds Numbers",
     ]
 
     def __init__( self, parent, parapy_obj=None ):
@@ -460,7 +461,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         szSE = wx.BoxSizer(wx.VERTICAL)
         sbSE = wx.StaticBoxSizer(wx.StaticBox(self.m_panelSE, wx.ID_ANY, _(u"Computed Properties")), wx.VERTICAL)
         fgSE = wx.FlexGridSizer(0, 2, 6, 10); fgSE.AddGrowableCol(1)
-        for lbl, attr in [("Reynolds Number:","m_txtReynolds"),("Solidity:","m_txtSolidity"),
+        for lbl, attr in [("Reynolds Number:","m_txtReynolds"),
                           ("Nusselt Number:","m_txtNusselt"),("Friction Factor:","m_txtFriction"),
                           ("Estimated Pressure Drop (Pa):","m_txtPressureDrop"),
                           ("Hydraulic Diameter (m):","m_txtDh")]:
@@ -641,6 +642,105 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_simplebook.AddPage(self.m_panelPrintPrep, u"Print Prep", False)
 
         # =============================================================
+        # PAGE 6 — Extrapolation to Higher Reynolds Numbers
+        # =============================================================
+        self.m_panelExtrap = wx.ScrolledWindow(self.m_simplebook, style=wx.VSCROLL)
+        self.m_panelExtrap.SetScrollRate(0, 10)
+        szExt = wx.BoxSizer(wx.VERTICAL)
+
+        # -- Reference conditions (read-only, populated from simulation) --
+        sbExtRef = wx.StaticBoxSizer(wx.StaticBox(self.m_panelExtrap, wx.ID_ANY, _(u"Reference Conditions (from simulation)")), wx.VERTICAL)
+        fgExtRef = wx.FlexGridSizer(0, 2, 6, 10); fgExtRef.AddGrowableCol(1)
+        _ro = wx.TE_READONLY
+        fgExtRef.Add(wx.StaticText(sbExtRef.GetStaticBox(), wx.ID_ANY, _(u"Re_ref  (−):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapReRef = wx.TextCtrl(sbExtRef.GetStaticBox(), wx.ID_ANY, u"—", style=_ro)
+        fgExtRef.Add(self.m_txtExtrapReRef, 1, wx.EXPAND)
+        fgExtRef.Add(wx.StaticText(sbExtRef.GetStaticBox(), wx.ID_ANY, _(u"Nu_ref  (−):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapNuRef = wx.TextCtrl(sbExtRef.GetStaticBox(), wx.ID_ANY, u"—", style=_ro)
+        fgExtRef.Add(self.m_txtExtrapNuRef, 1, wx.EXPAND)
+        fgExtRef.Add(wx.StaticText(sbExtRef.GetStaticBox(), wx.ID_ANY, _(u"f_ref   (−):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapFRef = wx.TextCtrl(sbExtRef.GetStaticBox(), wx.ID_ANY, u"—", style=_ro)
+        fgExtRef.Add(self.m_txtExtrapFRef, 1, wx.EXPAND)
+        fgExtRef.Add(wx.StaticText(sbExtRef.GetStaticBox(), wx.ID_ANY, _(u"D_h     (m):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapDh = wx.TextCtrl(sbExtRef.GetStaticBox(), wx.ID_ANY, u"—", style=_ro)
+        fgExtRef.Add(self.m_txtExtrapDh, 1, wx.EXPAND)
+        sbExtRef.Add(fgExtRef, 0, wx.EXPAND|wx.ALL, 5)
+        szExt.Add(sbExtRef, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- Correlation constants --
+        sbExtConst = wx.StaticBoxSizer(wx.StaticBox(self.m_panelExtrap, wx.ID_ANY, _(u"Correlation Constants")), wx.VERTICAL)
+        fgExtConst = wx.FlexGridSizer(0, 3, 5, 10); fgExtConst.AddGrowableCol(2)
+        fgExtConst.Add(wx.StaticText(sbExtConst.GetStaticBox(), wx.ID_ANY, _(u"Nu exponent  n:")), 0, wx.ALIGN_CENTER_VERTICAL)
+        add_info_button(sbExtConst.GetStaticBox(), fgExtConst, "Nusselt Scaling Exponent",
+            "Exponent n in  Nu = Nu_ref · (Re / Re_ref)ⁿ.\nFitted from gyroid heat-exchanger data: n = 0.70.")
+        self.m_spinExtrapN = wx.SpinCtrlDouble(sbExtConst.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(100,-1), wx.SP_ARROW_KEYS, 0.01, 5.0, 0.70, 0.01)
+        self.m_spinExtrapN.SetDigits(3); fgExtConst.Add(self.m_spinExtrapN, 0, wx.EXPAND)
+        fgExtConst.Add(wx.StaticText(sbExtConst.GetStaticBox(), wx.ID_ANY, _(u"f exponent   r:")), 0, wx.ALIGN_CENTER_VERTICAL)
+        add_info_button(sbExtConst.GetStaticBox(), fgExtConst, "Friction Scaling Exponent",
+            "Exponent r in  f = f∞ + (f_ref − f∞) · (Re / Re_ref)ʳ.\nFitted from data: r = −2.02.")
+        self.m_spinExtrapR = wx.SpinCtrlDouble(sbExtConst.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(100,-1), wx.SP_ARROW_KEYS, -10.0, -0.01, -2.02, 0.01)
+        self.m_spinExtrapR.SetDigits(3); fgExtConst.Add(self.m_spinExtrapR, 0, wx.EXPAND)
+        fgExtConst.Add(wx.StaticText(sbExtConst.GetStaticBox(), wx.ID_ANY, _(u"f_Re→∞:")), 0, wx.ALIGN_CENTER_VERTICAL)
+        add_info_button(sbExtConst.GetStaticBox(), fgExtConst, "Asymptotic Friction Factor",
+            "Turbulent asymptotic friction factor (Re → ∞).\nEstimated from data: f_Re→∞ = 0.99.")
+        self.m_spinExtrapFInf = wx.SpinCtrlDouble(sbExtConst.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(100,-1), wx.SP_ARROW_KEYS, 0.0, 10.0, 0.99, 0.01)
+        self.m_spinExtrapFInf.SetDigits(3); fgExtConst.Add(self.m_spinExtrapFInf, 0, wx.EXPAND)
+        sbExtConst.Add(fgExtConst, 0, wx.EXPAND|wx.ALL, 5)
+        szExt.Add(sbExtConst, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- Target Reynolds number + compute button --
+        sbExtTarget = wx.StaticBoxSizer(wx.StaticBox(self.m_panelExtrap, wx.ID_ANY, _(u"Target Conditions")), wx.HORIZONTAL)
+        sbExtTarget.Add(wx.StaticText(sbExtTarget.GetStaticBox(), wx.ID_ANY, _(u"Re target:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinExtrapReTarget = wx.SpinCtrlDouble(
+            sbExtTarget.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+            wx.DefaultPosition, wx.Size(130,-1), wx.SP_ARROW_KEYS, 1, 1e7, 5000.0, 500)
+        self.m_spinExtrapReTarget.SetDigits(0)
+        sbExtTarget.Add(self.m_spinExtrapReTarget, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
+        add_info_button(sbExtTarget.GetStaticBox(), sbExtTarget,
+            "Target Reynolds Number",
+            "Reynolds number to extrapolate to.\n"
+            "Re = ρ · D_h · U / μ.\n"
+            "Set higher than Re_ref to explore turbulent performance.")
+        self.m_btnComputeExtrap = wx.Button(sbExtTarget.GetStaticBox(), wx.ID_ANY, _(u"Compute Extrapolation"))
+        sbExtTarget.Add(self.m_btnComputeExtrap, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 8)
+        szExt.Add(sbExtTarget, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- Extrapolated results --
+        sbExtRes = wx.StaticBoxSizer(wx.StaticBox(self.m_panelExtrap, wx.ID_ANY, _(u"Extrapolated Results")), wx.VERTICAL)
+        fgExtRes = wx.FlexGridSizer(0, 2, 6, 10); fgExtRes.AddGrowableCol(1)
+        fgExtRes.Add(wx.StaticText(sbExtRes.GetStaticBox(), wx.ID_ANY, _(u"Nu  (extrapolated):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapNu = wx.TextCtrl(sbExtRes.GetStaticBox(), wx.ID_ANY, u"—", style=wx.TE_READONLY)
+        fgExtRes.Add(self.m_txtExtrapNu, 1, wx.EXPAND)
+        fgExtRes.Add(wx.StaticText(sbExtRes.GetStaticBox(), wx.ID_ANY, _(u"f   (extrapolated):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapF = wx.TextCtrl(sbExtRes.GetStaticBox(), wx.ID_ANY, u"—", style=wx.TE_READONLY)
+        fgExtRes.Add(self.m_txtExtrapF, 1, wx.EXPAND)
+        fgExtRes.Add(wx.StaticText(sbExtRes.GetStaticBox(), wx.ID_ANY, _(u"h   (W/m²·K):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapH = wx.TextCtrl(sbExtRes.GetStaticBox(), wx.ID_ANY, u"—", style=wx.TE_READONLY)
+        fgExtRes.Add(self.m_txtExtrapH, 1, wx.EXPAND)
+        fgExtRes.Add(wx.StaticText(sbExtRes.GetStaticBox(), wx.ID_ANY, _(u"Nu / Nu_ref  (−):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapNuRatio = wx.TextCtrl(sbExtRes.GetStaticBox(), wx.ID_ANY, u"—", style=wx.TE_READONLY)
+        fgExtRes.Add(self.m_txtExtrapNuRatio, 1, wx.EXPAND)
+        fgExtRes.Add(wx.StaticText(sbExtRes.GetStaticBox(), wx.ID_ANY, _(u"f  / f_ref   (−):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtExtrapFRatio = wx.TextCtrl(sbExtRes.GetStaticBox(), wx.ID_ANY, u"—", style=wx.TE_READONLY)
+        fgExtRes.Add(self.m_txtExtrapFRatio, 1, wx.EXPAND)
+        sbExtRes.Add(fgExtRes, 0, wx.EXPAND|wx.ALL, 5)
+        szExt.Add(sbExtRes, 0, wx.EXPAND|wx.ALL, 5)
+
+        _note = wx.StaticText(self.m_panelExtrap, wx.ID_ANY,
+            _(u"Nu = Nu_ref · (Re/Re_ref)ⁿ\n"
+              u"f  = f_Re→∞ + (f_ref − f_Re→∞) · (Re/Re_ref)ʳ\n"
+              u"Ref: Femmer et al. (2022) doi:10.1016/j.ijheatmasstransfer.2022.123642"))
+        _note.Wrap(700)
+        _note.SetForegroundColour(wx.Colour(120, 120, 120))
+        szExt.Add(_note, 0, wx.ALL, 10)
+
+        self.m_panelExtrap.SetSizer(szExt); self.m_panelExtrap.Layout(); self.m_panelExtrap.FitInside()
+        self.m_simplebook.AddPage(self.m_panelExtrap, u"Extrapolation", False)
+
+        # =============================================================
         # Footer
         # =============================================================
         bSizerMain.Add(wx.StaticLine(self), 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 10)
@@ -683,6 +783,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnDownloadBuildSTL.Bind(wx.EVT_BUTTON, self.onDownloadBuildSTL)
         self.m_btnDownloadOverhangSTL.Bind(wx.EVT_BUTTON, self.onDownloadOverhangSTL)
         self.m_btnDownloadSupportsSTL.Bind(wx.EVT_BUTTON, self.onDownloadSupportsSTL)
+        self.m_btnComputeExtrap.Bind(wx.EVT_BUTTON, self.onComputeExtrapolation)
 
     def __del__( self ): pass
     def onBack( self, event ): event.Skip()
@@ -707,6 +808,8 @@ class WorkflowWizardFrame ( wx.Frame ):
     def onDownloadBuildSTL( self, event ): event.Skip()
     def onDownloadOverhangSTL( self, event ): event.Skip()
     def onDownloadSupportsSTL( self, event ): event.Skip()
+    def onGenerateReport( self, event ): event.Skip()
+    def onComputeExtrapolation( self, event ): event.Skip()
 
 ###########################################################################
 ## Class QuadMeshExportDialog

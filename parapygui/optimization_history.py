@@ -144,8 +144,8 @@ class OptimizationHistory(Base):
 
     @Attribute
     def outlet_temperature(self) -> list[float]:
-        return self.series_fuzzy("outlet_temperature", "outlet_T", "T_out",
-                                 "Tout", "temperature", "T_outlet")
+        return self.series_fuzzy("outletT", "outlet_temperature", "outlet_T",
+                                 "T_out", "Tout", "temperature", "T_outlet")
 
     @Attribute
     def mechanical_dissipation(self) -> list[float]:

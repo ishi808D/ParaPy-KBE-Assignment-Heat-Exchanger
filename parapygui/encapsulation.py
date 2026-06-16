@@ -10,9 +10,13 @@ Coordinate convention (matches ParaPy Box: width=X, length=Y, height=Z):
 Ports are flush with the shell face and bore through the wall.
 """
 
+from math import pi
+
 from parapy.core import Input, Attribute, Part
 from parapy.core.validate import Range
 from parapy.geom import GeomBase, Box, SubtractedSolid, translate
+
+from gyroid import GyroidMesh
 
 
 class InletOutletSpec(GeomBase):
@@ -112,6 +116,10 @@ class Encapsulation(GeomBase):
     tube_length:     float = Input(0.020)
     mesh_deflection: float = Input(1e-4)
 
+    #: base wavenumber for the gyroid [rad/m]; 2π/k = unit-cell size
+    k_base:    float = Input(2 * pi / 0.010)
+    iso_level: float = Input(0.5)
+
     # ── geometry ─────────────────────────────────────────────────────
 
     @Part
@@ -208,12 +216,35 @@ class Encapsulation(GeomBase):
     def interior_volume(self):
         l, w, h = self.interior_dims
         return l * w * h
+    
+    @Attribute
+    def enclosed_volume(self):
+        return self.length * self.width * self.height
+    
+    @Attribute
+    def enclosed_gyroid_surface_area(self):
+        """Approximate surface area of the gyroid if it filled the entire enclosure."""
+        mesh = GyroidMesh(
+            length=self.length,
+            width=self.width,
+            height=self.height,
+            kx=[self.k_base],
+            ky=[self.k_base],
+            kz=[self.k_base],
+            iso_level=self.iso_level,
+        )
+        return mesh.surface_area
+
 
     @Attribute
     def hydraulic_diameter(self):
         _, w, h = self.interior_dims
-        return 4 * w * h / (2 * (w + h))
+        return 4*self.enclosed_volume / self.enclosed_gyroid_surface_area
 
     @Attribute
     def shell_volume(self):
-        return self.length * self.width * self.height - self.interior_volume
+        return self.enclosed_volume - self.interior_volume
+    
+    @Attribute
+    def inlet_window_size(self):
+        return self.inlet_bore_width * self.inlet_bore_height

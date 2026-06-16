@@ -218,6 +218,8 @@ class HeatExchanger(GeomBase):
             outlet_bore_height=self.outlet_bore_height,
             tube_wall=self.tube_wall,
             tube_length=self.tube_length,
+            k_base=self.initial_wavenumber,
+            iso_level=self.iso_level,
             position=self.position,
         )
 
@@ -652,3 +654,73 @@ class HeatExchanger(GeomBase):
     # enc_length, and self.fluid / self.encapsulation Parts.
     # ═════════════════════════════════════════════════════════════════
 
+    @Attribute
+    def mass_flow_rate(self) -> float:
+        """Mass flow rate at the laminar simulation inlet conditions."""
+        return self.fluid.density * self.inflow_velocity * self.encapsulation.inlet.flow_area
+
+    @Attribute
+    def outflow_temperature(self) -> float:
+        """Outlet fluid temperature [K].
+
+        Taken from the latest history record's ``outletT`` column when available.
+        Falls back to a linear plug-flow estimate (2*T_mean - T_in) when only
+        ``baseline_mean_temp`` is set, and to ``inflow_temperature`` before any
+        simulation has been run.
+        """
+        T_out = self.history.latest.get("outletT")
+        if T_out is not None:
+            return float(T_out)
+        if self.baseline_mean_temp > 0:
+            return 2.0 * self.baseline_mean_temp - self.inflow_temperature
+        return self.inflow_temperature
+
+    @Attribute
+    def heat_transfer_coefficient(self) -> float:
+        """Convective heat transfer coefficient back-calculated from the baseline simulation.
+
+        Uses the constant-wall-temperature NTU relation:
+            h = mdot * cp / A * ln((T_in - T_ext) / (T_out - T_ext))
+        Falls back to the input hconv when no simulation result is available.
+        """
+        T_out = self.outflow_temperature
+        T_in  = self.inflow_temperature
+        T_ext = self.exterior_temperature
+        if T_out >= T_in or T_out <= T_ext:
+            return self.hconv
+        A = self.encapsulation.enclosed_gyroid_surface_area
+        return (self.mass_flow_rate * self.fluid.specific_heat
+                * math.log((T_in - T_ext) / (T_out - T_ext)) / A)
+
+
+    @Attribute
+    def nusselt_number(self) -> float:
+        """Nusselt number at the laminar simulation inlet conditions."""
+        return self.encapsulation.hydraulic_diameter * self.heat_transfer_coefficient / self.fluid.conductivity
+    
+    @Attribute
+    def nusselt_number_empirical(self) -> float:
+        """Nusselt number from the semi-empirical sizing correlation."""
+        return 1.28 * self.reynolds_number**0.70
+    
+    @Attribute
+    def friction_empirical(self) -> float:
+        """Friction factor from the semi-empirical sizing correlation."""
+        return 0.99 + 0.037 * (self.mass_flow_rate * 3600) ** -2.02
+    
+    @Attribute
+    def pressure_drop_empirical(self) -> float:
+        """Pressure drop from the semi-empirical sizing correlation."""
+        import numpy as np
+        return self.friction_empirical * 2 * self.fluid.density * self.inflow_velocity**2 * np.sqrt(self.encapsulation.width * self.encapsulation.height) / self.encapsulation.hydraulic_diameter
+    
+    @Attribute
+    def disspower_empirical(self) -> float:
+        """Dissipation power from the semi-empirical sizing correlation."""
+        return self.pressure_drop_empirical * self.mass_flow_rate
+    
+    @Attribute
+    def heat_transfer_empirical(self) -> float:
+        """Heat transfer from the semi-empirical sizing correlation."""
+        return self.nusselt_number_empirical * self.fluid.conductivity / self.encapsulation.hydraulic_diameter
+    
