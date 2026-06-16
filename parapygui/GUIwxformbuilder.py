@@ -410,6 +410,9 @@ class WorkflowWizardFrame ( wx.Frame ):
         szBtns.Add(self.m_btnPySLM, 0, wx.ALL, 5)
         self.m_btnDownloadHist = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Download History"))
         szBtns.Add(self.m_btnDownloadHist, 0, wx.ALL, 5)
+        self.m_btnGenerateReport = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Generate PDF Report"))
+        self.m_btnGenerateReport.SetToolTip(_(u"Generate a PDF report with geometry images and optimisation history table"))
+        szBtns.Add(self.m_btnGenerateReport, 0, wx.ALL, 5)
         szRes.Add(szBtns, 0, wx.ALL, 5)
 
         # utility row
@@ -532,6 +535,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnQuadMesh.Bind(wx.EVT_BUTTON, self.onQuadMeshExport)
         self.m_btnPySLM.Bind(wx.EVT_BUTTON, self.onRunPySLM)
         self.m_btnDownloadHist.Bind(wx.EVT_BUTTON, self.onDownloadHistory)
+        self.m_btnGenerateReport.Bind(wx.EVT_BUTTON, self.onGenerateReport)
         self.m_btnServerStatus.Bind(wx.EVT_BUTTON, self.onServerStatus)
         self.m_btnListFiles.Bind(wx.EVT_BUTTON, self.onListFiles)
         self.m_btnDownloadApp.Bind(wx.EVT_BUTTON, self.onDownloadApp)
