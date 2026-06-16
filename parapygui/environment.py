@@ -27,7 +27,7 @@ class HeatExchangerEnvironment(Base):
 
     #: Static pressure at the outlet  [Pa]
     outlet_pressure: float = Input(
-        101325.0, validator=Range(1.0, 1e8))
+        101325.0, validator=Range(0.0, 1e8))
 
     #: Ambient / exterior wall temperature  [K]
     exterior_temperature: float = Input(
@@ -37,8 +37,6 @@ class HeatExchangerEnvironment(Base):
     wall_heat_conduction: float = Input(
         10.0, validator=Range(0.0, 1e6))
 
-    #: Mechanical dissipation lower bound (constraint)  [W]
-    mech_dissipation_lower: float = Input(0.0)
 
     #: Mechanical dissipation upper bound (constraint)  [W]
     mech_dissipation_upper: float = Input(10.0)

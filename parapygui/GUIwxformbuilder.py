@@ -12,6 +12,8 @@ import wx.html2
 import gettext
 _ = gettext.gettext
 
+from info_button_templates import add_info_tip, add_info_button
+
 ###########################################################################
 ## Class WorkflowWizardFrame
 ###########################################################################
@@ -61,18 +63,49 @@ class WorkflowWizardFrame ( wx.Frame ):
 
         # -- domain size (geometry.size_mm) --
         sbDom = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Domain Size (mm)")), wx.HORIZONTAL)
-        for lbl, attr, val in [("X:", "m_spinSizeX", 250.0), ("Y:", "m_spinSizeY", 250.0), ("Z:", "m_spinSizeZ", 300.0)]:
+        for lbl, attr, val, _ititle, _imsg in [
+            ("X:", "m_spinSizeX", 250.0,
+             "Domain Size X",
+             "Domain extent in X (width).\n"
+             "Defines the physical size of the simulation box.\n"
+             "Typical: 200–500 mm for bench-scale units."),
+            ("Y:", "m_spinSizeY", 250.0,
+             "Domain Size Y",
+             "Domain extent in Y (depth).\n"
+             "Defines the physical size of the simulation box.\n"
+             "Typical: 200–500 mm."),
+            ("Z:", "m_spinSizeZ", 300.0,
+             "Domain Size Z",
+             "Domain extent in Z (height / main flow direction).\n"
+             "Typical: 200–400 mm."),
+        ]:
             sbDom.Add(wx.StaticText(sbDom.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
             s = wx.SpinCtrlDouble(sbDom.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 2000, val, 5)
             setattr(self, attr, s); sbDom.Add(s, 0, wx.ALL, 4)
+            add_info_button(sbDom.GetStaticBox(), sbDom, _ititle, _imsg)
         szG.Add(sbDom, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- mesh cells (geometry.cells) --
         sbCells = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Mesh Resolution (cells)")), wx.HORIZONTAL)
-        for lbl, attr, val in [("X:", "m_spinCellsX", 75), ("Y:", "m_spinCellsY", 75), ("Z:", "m_spinCellsZ", 90)]:
+        for lbl, attr, val, _ititle, _imsg in [
+            ("X:", "m_spinCellsX", 75,
+             "Mesh Cells X",
+             "Number of mesh cells in the X direction.\n"
+             "Finer mesh → higher accuracy, longer runtime.\n"
+             "Recommended: 50–150 for optimisation runs."),
+            ("Y:", "m_spinCellsY", 75,
+             "Mesh Cells Y",
+             "Number of mesh cells in the Y direction.\n"
+             "Should match X for isotropic lateral resolution."),
+            ("Z:", "m_spinCellsZ", 90,
+             "Mesh Cells Z",
+             "Number of mesh cells in the Z (flow) direction.\n"
+             "Slightly higher than X/Y resolves gradients along the flow axis."),
+        ]:
             sbCells.Add(wx.StaticText(sbCells.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
             s = wx.SpinCtrl(sbCells.GetStaticBox(), wx.ID_ANY, str(val), wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 5, 500, val)
             setattr(self, attr, s); sbCells.Add(s, 0, wx.ALL, 4)
+            add_info_button(sbCells.GetStaticBox(), sbCells, _ititle, _imsg)
         # total cell count display
         self.m_lblTotalCells = wx.StaticText(sbCells.GetStaticBox(), wx.ID_ANY, _(u"  = 506,250 cells"))
         self.m_lblTotalCells.SetForegroundColour(wx.Colour(120, 120, 120))
@@ -81,17 +114,45 @@ class WorkflowWizardFrame ( wx.Frame ):
 
         # -- Shape settings --
         sbEnc = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Shape settings")), wx.VERTICAL)
-        fgEnc = wx.FlexGridSizer(0, 4, 5, 10); fgEnc.AddGrowableCol(1); fgEnc.AddGrowableCol(3)
-        for lbl, attr, lo, hi, val, inc in [
-            ("Encapsulation wall (mm):", "m_spinEncapWall",   0.5,  20,   3.0, 0.5),
-            ("Gyroid wall (mm):",        "m_spinGyroidWall",  0.01, 10,   0.2, 0.01),
-            ("Gyroid unit cell (mm):",   "m_spinGyroidUnit",  0.1,  50,   1.8, 0.1),
-            (u"ε smoother (mm):",        "m_spinEpsilon",     0.01, 10,   0.2, 0.01),
-            ("Ctrl pt spacing (mm):",    "m_spinSpacing",     0.1,  100,  7.0, 0.1),
-            ("RBF resolution (mm):",     "m_spinBakeSpacing", 0.1,  50,   1.4, 0.1),
-            ("Wavenumber field max (rad/mm):", "m_spinKboundShape", 0.001, 100, 3.4, 0.1),
+        fgEnc = wx.FlexGridSizer(0, 3, 5, 10); fgEnc.AddGrowableCol(2)
+        for lbl, attr, lo, hi, val, inc, _ititle, _imsg in [
+            ("Encapsulation wall (mm):", "m_spinEncapWall",   0.5,  20,   3.0, 0.5,
+             "Encapsulation Wall",
+             "Thickness of the outer solid shell enclosing the gyroid lattice (mm).\n"
+             "Acts as the heat exchanger casing.\n"
+             "Minimum: 2x the nominal print layer thickness."),
+            ("Gyroid wall (mm):",        "m_spinGyroidWall",  0.01, 10,   0.2, 0.01,
+             "Gyroid Wall Thickness",
+             "Thickness of the gyroid sheet wall (mm).\n"
+             "Smaller = more surface area but harder to print.\n"
+             "Typical for SLM/LPBF: 0.1–0.4 mm."),
+            ("Gyroid unit cell (mm):",   "m_spinGyroidUnit",  0.1,  50,   1.8, 0.1,
+             "Gyroid Unit Cell Size",
+             "Side length of one repeating gyroid unit cell (mm).\n"
+             "Smaller cells = more surface area per volume.\n"
+             "Typical: 1–5 mm depending on manufacturing process."),
+            (u"ε smoother (mm):",        "m_spinEpsilon",     0.01, 10,   0.2, 0.01,
+             u"Epsilon Smoother",
+             "Smoothing length for the epsilon-regularised Heaviside projection (mm).\n"
+             "Controls sharpness of the solid/fluid interface.\n"
+             "Recommended: set equal to the gyroid wall thickness."),
+            ("Ctrl pt spacing (mm):",    "m_spinSpacing",     0.1,  100,  7.0, 0.1,
+             "Control Point Spacing",
+             "Spacing of RBF (radial basis function) control points\n"
+             "used for wavenumber field interpolation (mm).\n"
+             "Coarser spacing -> faster but lower spatial resolution of k(x)."),
+            ("RBF resolution (mm):",     "m_spinBakeSpacing", 0.1,  50,   1.4, 0.1,
+             "RBF Bake Resolution",
+             "Voxel resolution for baking the RBF wavenumber field onto the mesh (mm).\n"
+             "Should be <= gyroid unit cell / 2 to satisfy the Nyquist criterion."),
+            ("Wavenumber field max (rad/mm):", "m_spinKboundShape", 0.001, 100, 3.4, 0.1,
+             "Wavenumber Field Maximum",
+             "Maximum allowed wavenumber k in the optimised field (rad/mm).\n"
+             "k = 2*pi / L_cell, so k_max = 3.4 rad/mm gives L_min ~1.85 mm.\n"
+             "Prevents the optimiser from producing unprintably fine features."),
         ]:
             fgEnc.Add(wx.StaticText(sbEnc.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            add_info_button(sbEnc.GetStaticBox(), fgEnc, _ititle, _imsg)
             s = wx.SpinCtrlDouble(sbEnc.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
             setattr(self, attr, s); fgEnc.Add(s, 0, wx.EXPAND)
         sbEnc.Add(fgEnc, 0, wx.EXPAND|wx.ALL, 5)
@@ -99,16 +160,34 @@ class WorkflowWizardFrame ( wx.Frame ):
 
         # -- inlet --
         sbIn = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Inlet")), wx.VERTICAL)
-        fgIn = wx.FlexGridSizer(0, 4, 5, 10); fgIn.AddGrowableCol(1); fgIn.AddGrowableCol(3)
-        for lbl, attr, lo, hi, val, inc in [
-            ("Velocity (m/s):",    "m_spinInletVel",  0.01, 100, 2.0, 0.1),
-            ("Temperature (K):",   "m_spinInletTemp", 200, 2000, 380.0, 5),
-            ("Window origin X (mm):", "m_spinInWinOX", 0, 2000, 10, 1),
-            ("Window origin Y (mm):", "m_spinInWinOY", 0, 2000, 10, 1),
-            ("Window size X (mm):",   "m_spinInWinSX", 1, 2000, 10, 1),
-            ("Window size Y (mm):",   "m_spinInWinSY", 1, 2000, 15, 1),
+        fgIn = wx.FlexGridSizer(0, 3, 5, 10); fgIn.AddGrowableCol(2)
+        for lbl, attr, lo, hi, val, inc, _ititle, _imsg in [
+            ("Velocity (m/s):",    "m_spinInletVel",  0.01, 100, 2.0, 0.1,
+             "Inlet Velocity",
+             "Inlet velocity magnitude (m/s).\n"
+             "Determines Re = U * Dh / nu.\n"
+             "Higher velocity -> more heat transfer but higher pressure drop."),
+            ("Temperature (K):",   "m_spinInletTemp", 200, 2000, 380.0, 5,
+             "Inlet Temperature",
+             "Inlet fluid temperature (K).\n"
+             "The fluid enters at this temperature and exchanges heat with the walls."),
+            ("Window origin X (mm):", "m_spinInWinOX", 0, 2000, 10, 1,
+             "Inlet Window Origin X",
+             "X-coordinate of the inlet patch bottom-left corner (mm).\n"
+             "Positioned within the XY face at Z = 0."),
+            ("Window origin Y (mm):", "m_spinInWinOY", 0, 2000, 10, 1,
+             "Inlet Window Origin Y",
+             "Y-coordinate of the inlet patch bottom-left corner (mm)."),
+            ("Window size X (mm):",   "m_spinInWinSX", 1, 2000, 10, 1,
+             "Inlet Window Size X",
+             "Width of the inlet velocity patch in X (mm).\n"
+             "Must fit within the domain X size minus the encapsulation wall."),
+            ("Window size Y (mm):",   "m_spinInWinSY", 1, 2000, 15, 1,
+             "Inlet Window Size Y",
+             "Height of the inlet velocity patch in Y (mm)."),
         ]:
             fgIn.Add(wx.StaticText(sbIn.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            add_info_button(sbIn.GetStaticBox(), fgIn, _ititle, _imsg)
             s = wx.SpinCtrlDouble(sbIn.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(110,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
             setattr(self, attr, s); fgIn.Add(s, 0, wx.EXPAND)
         sbIn.Add(fgIn, 0, wx.EXPAND|wx.ALL, 5)
@@ -116,15 +195,30 @@ class WorkflowWizardFrame ( wx.Frame ):
 
         # -- outlet --
         sbOut = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Outlet")), wx.VERTICAL)
-        fgOut = wx.FlexGridSizer(0, 4, 5, 10); fgOut.AddGrowableCol(1); fgOut.AddGrowableCol(3)
-        for lbl, attr, lo, hi, val, inc in [
-            ("Gauge pressure (Pa):",    "m_spinOutletP",  0, 1e7, 0.0, 100),
-            ("Window origin X (mm):",   "m_spinOutWinOX", 0, 2000, 220, 1),
-            ("Window origin Y (mm):",   "m_spinOutWinOY", 0, 2000, 220, 1),
-            ("Window size X (mm):",     "m_spinOutWinSX", 1, 2000, 10, 1),
-            ("Window size Y (mm):",     "m_spinOutWinSY", 1, 2000, 15, 1),
+        fgOut = wx.FlexGridSizer(0, 3, 5, 10); fgOut.AddGrowableCol(2)
+        for lbl, attr, lo, hi, val, inc, _ititle, _imsg in [
+            ("Gauge pressure (Pa):",    "m_spinOutletP",  0, 1e7, 0.0, 100,
+             "Outlet Gauge Pressure",
+             "Outlet gauge pressure (Pa).\n"
+             "Set to 0 for a standard pressure-outlet boundary condition.\n"
+             "The solver computes the pressure drop relative to this reference."),
+            ("Window origin X (mm):",   "m_spinOutWinOX", 0, 2000, 220, 1,
+             "Outlet Window Origin X",
+             "X-coordinate of the outlet patch bottom-left corner (mm).\n"
+             "Positioned within the XY face at Z = domain depth."),
+            ("Window origin Y (mm):",   "m_spinOutWinOY", 0, 2000, 220, 1,
+             "Outlet Window Origin Y",
+             "Y-coordinate of the outlet patch bottom-left corner (mm)."),
+            ("Window size X (mm):",     "m_spinOutWinSX", 1, 2000, 10, 1,
+             "Outlet Window Size X",
+             "Width of the outlet pressure patch in X (mm).\n"
+             "Typically matches the inlet window size."),
+            ("Window size Y (mm):",     "m_spinOutWinSY", 1, 2000, 15, 1,
+             "Outlet Window Size Y",
+             "Height of the outlet pressure patch in Y (mm)."),
         ]:
             fgOut.Add(wx.StaticText(sbOut.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            add_info_button(sbOut.GetStaticBox(), fgOut, _ititle, _imsg)
             s = wx.SpinCtrlDouble(sbOut.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(110,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
             setattr(self, attr, s); fgOut.Add(s, 0, wx.EXPAND)
         sbOut.Add(fgOut, 0, wx.EXPAND|wx.ALL, 5)
@@ -132,20 +226,56 @@ class WorkflowWizardFrame ( wx.Frame ):
 
         # -- material / thermal --
         sbMat = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Material && Thermal")), wx.VERTICAL)
-        fgMat = wx.FlexGridSizer(0, 4, 5, 10); fgMat.AddGrowableCol(1); fgMat.AddGrowableCol(3)
-        for lbl, attr, lo, hi, val, inc in [
-            ("Exterior temp (K):",          "m_spinTexterior", 100,    2000,   270.0,   5),
-            (u"qα / qₖ (shape):",           "m_spinQu",        0.0001, 1.0,    0.005,   0.001),
-            (u"Kinematic visc (m²/s):",     "m_spinNu",        1e-8,   1e-3,   1e-6,    1e-7),
-            (u"Fluid density (kg/m³):",     "m_spinRhoFluid",  0.1,    10000,  1000.0,  10),
-            (u"k_f (W/m·K):",              "m_spinKf",        0.001,  1000,   0.61,    0.01),
-            (u"k_s (W/m·K):",              "m_spinKs",        0.001,  10000,  237.0,   1.0),
-            (u"cₚ (J/kg·K):",              "m_spinCp",        1,      100000, 4180.0,  10.0),
-            (u"ρ_s (g/mm³):",              "m_spinRhoS",      1e-5,   0.1,    0.0027,  0.0001),
-            ("Da (Darcy number):",          "m_spinDa",        0,      1e-3,   1e-9,    1e-10),
-            (u"h (W/m²·K):",               "m_spinHconv",     0.1,    100000, 1000.0,  10.0),
+        fgMat = wx.FlexGridSizer(0, 3, 5, 10); fgMat.AddGrowableCol(2)
+        for lbl, attr, lo, hi, val, inc, _ititle, _imsg in [
+            ("Exterior temp (K):",          "m_spinTexterior", 100,    2000,   270.0,   5,
+             "Exterior Temperature",
+             "Temperature of the exterior (wall) boundary (K).\n"
+             "Applied as a fixed-temperature BC on the encapsulation walls.\n"
+             "Also mirrors to T_initial — the starting fluid temperature."),
+            (u"qα / qₖ (shape):",           "m_spinQu",        0.0001, 1.0,    0.005,   0.001,
+             "Shape Regularisation Weight",
+             "Weight ratio controlling shape regularisation.\n"
+             "Trades off thermal performance against smooth, manufacturable geometry.\n"
+             "Higher values enforce smoother wavenumber fields."),
+            (u"Kinematic visc (m²/s):",     "m_spinNu",        1e-8,   1e-3,   1e-6,    1e-7,
+             "Kinematic Viscosity",
+             "Kinematic viscosity of the fluid nu = mu/rho (m^2/s).\n"
+             "Water at 25 C: ~1e-6 m^2/s.\n"
+             "Air at 25 C: ~1.5e-5 m^2/s."),
+            (u"Fluid density (kg/m³):",     "m_spinRhoFluid",  0.1,    10000,  1000.0,  10,
+             "Fluid Density",
+             "Fluid density rho (kg/m^3).\n"
+             "Water ~1000 kg/m^3, air ~1.2 kg/m^3."),
+            (u"k_f (W/m·K):",              "m_spinKf",        0.001,  1000,   0.61,    0.01,
+             "Fluid Thermal Conductivity",
+             "Fluid thermal conductivity k_f (W/m*K).\n"
+             "Water ~0.61, air ~0.026 W/m*K."),
+            (u"k_s (W/m·K):",              "m_spinKs",        0.001,  10000,  237.0,   1.0,
+             "Solid Thermal Conductivity",
+             "Solid thermal conductivity k_s (W/m*K).\n"
+             "Aluminium ~237, copper ~400, steel ~50 W/m*K."),
+            (u"cₚ (J/kg·K):",              "m_spinCp",        1,      100000, 4180.0,  10.0,
+             "Specific Heat Capacity",
+             "Specific heat capacity of the fluid cp (J/kg*K).\n"
+             "Water ~4180, air ~1005 J/kg*K."),
+            (u"ρ_s (g/mm³):",              "m_spinRhoS",      1e-5,   0.1,    0.0027,  0.0001,
+             "Solid Density",
+             "Solid material density rho_s (g/mm^3).\n"
+             "Aluminium ~0.0027, Ti-6Al-4V ~0.00443 g/mm^3.\n"
+             "Used for mass estimation in manufacturability analysis."),
+            ("Da (Darcy number):",          "m_spinDa",        0,      1e-3,   1e-9,    1e-10,
+             "Darcy Number",
+             "Darcy number Da = K / L^2 — permeability parameter for the\n"
+             "Brinkman porous-medium regularisation term.\n"
+             "Set near 0 for solid regions; small values regularise the interface."),
+            (u"h (W/m²·K):",               "m_spinHconv",     0.1,    100000, 1000.0,  10.0,
+             "Convective Heat Transfer Coefficient",
+             "External convective heat transfer coefficient h (W/m^2*K).\n"
+             "Typical: 5–25 (natural air), 500–10000 (forced liquid cooling)."),
         ]:
             fgMat.Add(wx.StaticText(sbMat.GetStaticBox(), wx.ID_ANY, _(lbl)), 0, wx.ALIGN_CENTER_VERTICAL)
+            add_info_button(sbMat.GetStaticBox(), fgMat, _ititle, _imsg)
             s = wx.SpinCtrlDouble(sbMat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(110,-1), wx.SP_ARROW_KEYS, lo, hi, val, inc)
             setattr(self, attr, s); fgMat.Add(s, 0, wx.EXPAND)
         self.m_spinRhoS.SetDigits(6)
@@ -169,14 +299,28 @@ class WorkflowWizardFrame ( wx.Frame ):
         szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"10", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 10)
         szRunRow1.Add(self.m_spinCores, 0, wx.ALL, 4)
+        add_info_button(sbRun.GetStaticBox(), szRunRow1, "Parallel Cores",
+            "Number of parallel MPI processes for OpenFOAM.\n"
+            "Set to the number of available CPU cores.\n"
+            "Must divide evenly into the mesh cell count for good load balancing.")
         szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinMaxIter = wx.SpinCtrlDouble(sbRun.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 5000, 100, 10)
         szRunRow1.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
+        add_info_button(sbRun.GetStaticBox(), szRunRow1, "Max Iterations",
+            "Maximum number of solver iterations per optimisation step.\n"
+            "Higher -> more accurate but slower per step.\n"
+            "Typical: 100–500 for OpenFOAM steady-state runs.")
         szRunRow1.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Opt. method:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_choiceOptMethod = wx.Choice(sbRun.GetStaticBox(), wx.ID_ANY,
             choices=[u"MMA", u"L-BFGS-B", u"trust-constr", u"pareto"])
         self.m_choiceOptMethod.SetSelection(0)
         szRunRow1.Add(self.m_choiceOptMethod, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
+        add_info_button(sbRun.GetStaticBox(), szRunRow1, "Optimisation Method",
+            "Optimisation algorithm:\n"
+            "  MMA         — Method of Moving Asymptotes (default; robust for topology opt.)\n"
+            "  L-BFGS-B    — quasi-Newton, fast for smooth unconstrained problems\n"
+            "  trust-constr — SciPy constrained solver, good for small problems\n"
+            "  pareto      — multi-objective Pareto front sweep")
         sbRun.Add(szRunRow1, 0, wx.EXPAND)
         # row 2: mode dropdown + conditional parameter panels
         szRunRow2 = wx.BoxSizer(wx.HORIZONTAL)
@@ -184,12 +328,20 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_choiceMode = wx.Choice(sbRun.GetStaticBox(), wx.ID_ANY, choices=[u"pressure", u"heat"])
         self.m_choiceMode.SetSelection(0)
         szRunRow2.Add(self.m_choiceMode, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 4)
+        add_info_button(sbRun.GetStaticBox(), szRunRow2, "Optimisation Mode",
+            "Optimisation objective:\n"
+            "  pressure — minimise pressure drop (dissipation) subject to max avg temperature\n"
+            "  heat     — minimise mean fluid temperature subject to max dissipative power")
         # pressure panel: max average temperature
         self.m_panelMeanT = wx.Panel(sbRun.GetStaticBox(), wx.ID_ANY)
         _szMeanT = wx.BoxSizer(wx.HORIZONTAL)
         _szMeanT.Add(wx.StaticText(self.m_panelMeanT, wx.ID_ANY, _(u"Max avg temp (K):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinRunMeanTMax = wx.SpinCtrlDouble(self.m_panelMeanT, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 2000, 303.0, 1.0)
         _szMeanT.Add(self.m_spinRunMeanTMax, 0, wx.ALL, 4)
+        add_info_button(self.m_panelMeanT, _szMeanT, "Max Average Temperature",
+            "Maximum allowed mean fluid temperature (K).\n"
+            "Active constraint when mode = pressure.\n"
+            "The optimiser minimises dissipation while keeping T_mean <= this value.")
         self.m_panelMeanT.SetSizer(_szMeanT)
         szRunRow2.Add(self.m_panelMeanT, 0, wx.ALIGN_CENTER_VERTICAL)
         # heat panel: max dissipative power
@@ -198,6 +350,10 @@ class WorkflowWizardFrame ( wx.Frame ):
         _szDissPMax.Add(wx.StaticText(self.m_panelDissPMax, wx.ID_ANY, _(u"Max diss. power (W):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinRunDissPMax = wx.SpinCtrlDouble(self.m_panelDissPMax, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(100,-1), wx.SP_ARROW_KEYS, 0, 1e8, 9800.0, 100.0)
         _szDissPMax.Add(self.m_spinRunDissPMax, 0, wx.ALL, 4)
+        add_info_button(self.m_panelDissPMax, _szDissPMax, "Max Dissipative Power",
+            "Maximum allowed dissipative power (W).\n"
+            "Active constraint when mode = heat.\n"
+            "The optimiser minimises T_mean while keeping dissipation <= this value.")
         self.m_panelDissPMax.SetSizer(_szDissPMax)
         self.m_panelDissPMax.Hide()
         szRunRow2.Add(self.m_panelDissPMax, 0, wx.ALIGN_CENTER_VERTICAL)
@@ -215,22 +371,42 @@ class WorkflowWizardFrame ( wx.Frame ):
             choices=[u"On", u"Off"], majorDimension=1, style=wx.RA_SPECIFY_ROWS)
         self.m_radioMfg.SetSelection(0)
         szRunRow3.Add(self.m_radioMfg, 0, wx.ALL|wx.ALIGN_TOP, 4)
+        add_info_button(sbRun.GetStaticBox(), szRunRow3, "Manufacturability Analysis",
+            "Enable additive-manufacturing (AM) constraints during optimisation.\n"
+            "Penalises overhangs beyond the specified angle and bridging spans\n"
+            "exceeding the max bridge length.")
         # conditional panel shown when mfg is On
         self.m_panelMfgDetails = wx.Panel(sbRun.GetStaticBox(), wx.ID_ANY)
         _szMfg = wx.BoxSizer(wx.VERTICAL)
-        _fgMfg = wx.FlexGridSizer(0, 4, 5, 10)
-        _fgMfg.AddGrowableCol(1); _fgMfg.AddGrowableCol(3)
+        _fgMfg = wx.FlexGridSizer(0, 3, 5, 10)
+        _fgMfg.AddGrowableCol(2)
         _fgMfg.Add(wx.StaticText(self.m_panelMfgDetails, wx.ID_ANY, _(u"Max overhang angle (°):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        add_info_button(self.m_panelMfgDetails, _fgMfg,
+            "Max Overhang Angle",
+            "Maximum angle of unsupported overhangs (degrees).\n"
+            "Default 45 degrees is typical for FDM/LPBF printing.\n"
+            "Faces exceeding this angle require support structures.")
         self.m_spinRunAmTheta = wx.SpinCtrlDouble(self.m_panelMfgDetails, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0, 90, 45.0, 1.0)
         _fgMfg.Add(self.m_spinRunAmTheta, 0, wx.EXPAND)
         _fgMfg.Add(wx.StaticText(self.m_panelMfgDetails, wx.ID_ANY, _(u"Max bridging length (mm):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        add_info_button(self.m_panelMfgDetails, _fgMfg,
+            "Max Bridging Length",
+            "Maximum self-supporting horizontal span (mm) before a\n"
+            "downskin island needs support structures.\n"
+            "Typical for LPBF: 0.5–2 mm.")
         self.m_spinRunAmLBridge = wx.SpinCtrlDouble(self.m_panelMfgDetails, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.01, 500, 1.5, 0.1)
         _fgMfg.Add(self.m_spinRunAmLBridge, 0, wx.EXPAND)
         _szMfg.Add(_fgMfg, 0, wx.EXPAND|wx.ALL, 4)
         self.m_radioAlignFlow = wx.RadioBox(self.m_panelMfgDetails, wx.ID_ANY, _(u"Align print to flow?"),
             choices=[u"Yes", u"No"], majorDimension=1, style=wx.RA_SPECIFY_ROWS)
         self.m_radioAlignFlow.SetSelection(0)
-        _szMfg.Add(self.m_radioAlignFlow, 0, wx.ALL, 4)
+        _szAlignRow = wx.BoxSizer(wx.HORIZONTAL)
+        _szAlignRow.Add(self.m_radioAlignFlow, 0)
+        add_info_button(self.m_panelMfgDetails, _szAlignRow, "Align Print to Flow",
+            "When Yes, the LPBF build direction is set to match the main flow axis.\n"
+            "When No, enter a custom build direction vector below.\n"
+            "Aligning to flow often gives the best overhang performance.")
+        _szMfg.Add(_szAlignRow, 0, wx.ALL, 4)
         # build direction panel (visible when align=No)
         self.m_panelBuildDir = wx.Panel(self.m_panelMfgDetails, wx.ID_ANY)
         _szBD = wx.BoxSizer(wx.HORIZONTAL)
@@ -243,6 +419,10 @@ class WorkflowWizardFrame ( wx.Frame ):
         _szBD.Add(wx.StaticText(self.m_panelBuildDir, wx.ID_ANY, _(u"Z:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 4)
         self.m_spinBuildDirZ = wx.SpinCtrlDouble(self.m_panelBuildDir, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, -1000, 1000, 1.0, 0.1)
         _szBD.Add(self.m_spinBuildDirZ, 0, wx.ALL, 2)
+        add_info_button(self.m_panelBuildDir, _szBD, "Custom Build Direction",
+            "Custom LPBF build direction vector (X, Y, Z).\n"
+            "Does not need to be normalised — the solver normalises it automatically.\n"
+            "Example: (0, 0, 1) = build vertically along Z.")
         self.m_panelBuildDir.SetSizer(_szBD)
         self.m_panelBuildDir.Hide()
         _szMfg.Add(self.m_panelBuildDir, 0, wx.EXPAND|wx.TOP, 2)
@@ -266,11 +446,21 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnLoadJSON = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Load Config (JSON)…"))
         self.m_btnLoadJSON.SetToolTip("ⓘ Load a previously saved configuration from the inputs/ folder")
         szFileOps.Add(self.m_btnLoadJSON, 0, wx.ALL, 5)
+        add_info_button(self.m_panelGeom, szFileOps, "Load Config",
+            "Load a previously saved JSON configuration from the inputs/ folder.\n"
+            "All fields on this page will be overwritten with the saved values.")
         self.m_btnSaveJSON = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Save Config (JSON)…"))
         self.m_btnSaveJSON.SetToolTip("ⓘ Save current settings to the outputs/ folder for later reuse")
         szFileOps.Add(self.m_btnSaveJSON, 0, wx.ALL, 5)
+        add_info_button(self.m_panelGeom, szFileOps, "Save Config",
+            "Save the current page settings as a JSON file in the outputs/ folder.\n"
+            "Use Load Config to restore them in a future session.")
         self.m_btnApplyGeom = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Apply to model"))
         szFileOps.Add(self.m_btnApplyGeom, 0, wx.ALL, 5)
+        add_info_button(self.m_panelGeom, szFileOps, "Apply to Model",
+            "Push all geometry and boundary-condition settings from this page\n"
+            "to the live ParaPy model object.\n"
+            "Required before running any simulation or export step.")
         szG.Add(szFileOps, 0, wx.ALL, 5)
         self.m_panelGeom.SetSizer(szG); self.m_panelGeom.Layout(); self.m_panelGeom.FitInside()
         self.m_simplebook.AddPage(self.m_panelGeom, u"Geometry", True)
@@ -294,8 +484,8 @@ class WorkflowWizardFrame ( wx.Frame ):
         # Info note
         info = wx.StaticText(self.m_panelSE, wx.ID_ANY,
             _(u"ⓘ These values are computed from the semi-empirical correlations "
-              u"(Cheng et al. 2023, DOI: 10.1016/j.enconman.2023.116955). "
-              u"Replace placeholder Dittus-Boelter fits with actual gyroid TPMS data for production use."))
+              u"(https://doi.org/10.1016/j.ijheatmasstransfer.2022.123642).\n" \
+              "See Informal Knowledge Model for more details."))
         info.Wrap(600)
         info.SetForegroundColour(wx.Colour(120, 120, 120))
         szSE.Add(info, 0, wx.ALL, 10)

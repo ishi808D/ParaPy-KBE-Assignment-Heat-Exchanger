@@ -31,10 +31,10 @@ import numpy as np
 from parapy.core import Base, Input, Attribute
 
 
-def _gyroid(X, Y, Z, kx, ky, kz):
-    return (np.sin(kx * X) * np.cos(ky * Y) +
-            np.sin(ky * Y) * np.cos(kz * Z) +
-            np.sin(kz * Z) * np.cos(kx * X))
+def _gyroid(X, Y, Z, k):
+    return (np.sin(k * X) * np.cos(k * Y) +
+            np.sin(k * Y) * np.cos(k * Z) +
+            np.sin(k * Z) * np.cos(k * X))
 
 
 class GyroidMesh(Base):
@@ -47,20 +47,19 @@ class GyroidMesh(Base):
 
     # ── bounding box  [m] ────────────────────────────────────────────
 
-    length: float = Input(0.10)
-    width:  float = Input(0.05)
-    height: float = Input(0.05)
+    length: float = Input(0.25)
+    width:  float = Input(0.25)
+    height: float = Input(0.30)
 
-    # ── wavenumber field ─────────────────────────────────────────────
+    # ── spatially-varying wavenumber field (RBF control points) ──────
 
-    #: control-point locations  [(x,y,z), …]  in metres
-    ctrl_locations: list = Input([(0.05, 0.025, 0.025)])
-    kx: list = Input([628.0])
-    ky: list = Input([628.0])
-    kz: list = Input([628.0])
+    ctrl_locations: list = Input([])  # list of (x,y,z) tuples [m]
+    kx: list = Input([])              # wavenumber in x at each ctrl point [rad/m]
+    ky: list = Input([])              # wavenumber in y at each ctrl point [rad/m]
+    kz: list = Input([])              # wavenumber in z at each ctrl point [rad/m]
 
     #: iso-level controlling wall thickness / solidity  (|F| < iso = solid)
-    iso_level: float = Input(0.3)
+    iso_level: float = Input(0.5)
 
     # ── resolution ───────────────────────────────────────────────────
 
@@ -89,11 +88,18 @@ class GyroidMesh(Base):
                 self.height / (nz - 1))
 
     @Attribute
-    def wavenumber_grids(self):
-        """Interpolated (KX, KY, KZ) arrays over the voxel grid.
+    def _k_mean(self) -> float:
+        """Mean wavenumber [rad/m] from the ctrl-point field; falls back to a
+        10 mm unit cell when no field has been synced yet."""
+        vals = list(self.kx) + list(self.ky) + list(self.kz)
+        return float(np.mean(vals)) if vals else 2 * np.pi / 0.010
 
-        Uses inverse-distance weighting from the control points.
-        Returns three numpy arrays of shape grid_shape.
+    @Attribute
+    def field(self):
+        """The TPMS implicit field F on the voxel grid (numpy array).
+
+        Uses IDW-interpolated wavenumber when ctrl_locations are provided,
+        otherwise a uniform k_mean across the whole grid.
         """
         nx, ny, nz = self.grid_shape
         xs = np.linspace(0, self.length, nx)
@@ -101,42 +107,25 @@ class GyroidMesh(Base):
         zs = np.linspace(0, self.height, nz)
         X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
 
-        pts = np.asarray(self.ctrl_locations, dtype=float)  # (M,3)
-        kx = np.asarray(self.kx, dtype=float)
-        ky = np.asarray(self.ky, dtype=float)
-        kz = np.asarray(self.kz, dtype=float)
+        if self.ctrl_locations and self.kx:
+            pts = np.array(self.ctrl_locations, dtype=float)   # (N,3)
+            kx_arr = np.array(self.kx, dtype=float)
+            ky_arr = np.array(self.ky, dtype=float) if self.ky else kx_arr
+            kz_arr = np.array(self.kz, dtype=float) if self.kz else kx_arr
+            xf, yf, zf = X.ravel(), Y.ravel(), Z.ravel()
+            coords = np.stack([xf, yf, zf], axis=1)           # (M,3)
+            diff = coords[:, None, :] - pts[None, :, :]        # (M,N,3)
+            dist2 = (diff ** 2).sum(axis=2) + 1e-12            # (M,N)
+            w = 1.0 / dist2                                     # IDW weights
+            w /= w.sum(axis=1, keepdims=True)
+            k_x = (w * kx_arr).sum(axis=1).reshape(X.shape)
+            k_y = (w * ky_arr).sum(axis=1).reshape(Y.shape)
+            k_z = (w * kz_arr).sum(axis=1).reshape(Z.shape)
+            return (np.sin(k_x * X) * np.cos(k_y * Y) +
+                    np.sin(k_y * Y) * np.cos(k_z * Z) +
+                    np.sin(k_z * Z) * np.cos(k_x * X))
 
-        if len(pts) == 1:
-            # Uniform field — fast path
-            return (np.full(X.shape, kx[0]),
-                    np.full(X.shape, ky[0]),
-                    np.full(X.shape, kz[0]))
-
-        # Inverse-distance weighting
-        KX = np.zeros(X.shape)
-        KY = np.zeros(X.shape)
-        KZ = np.zeros(X.shape)
-        wsum = np.zeros(X.shape)
-        eps = 1e-9
-        for i, (px, py, pz) in enumerate(pts):
-            d2 = (X - px)**2 + (Y - py)**2 + (Z - pz)**2 + eps
-            w = 1.0 / d2
-            KX += w * kx[i]
-            KY += w * ky[i]
-            KZ += w * kz[i]
-            wsum += w
-        return (KX / wsum, KY / wsum, KZ / wsum)
-
-    @Attribute
-    def field(self):
-        """The TPMS implicit field F on the voxel grid (numpy array)."""
-        nx, ny, nz = self.grid_shape
-        xs = np.linspace(0, self.length, nx)
-        ys = np.linspace(0, self.width, ny)
-        zs = np.linspace(0, self.height, nz)
-        X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
-        KX, KY, KZ = self.wavenumber_grids
-        return _gyroid(X, Y, Z, KX, KY, KZ)
+        return _gyroid(X, Y, Z, self._k_mean)
 
     # ── derived mesh ─────────────────────────────────────────────────
 

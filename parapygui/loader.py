@@ -4,7 +4,6 @@ loader.py
 Handles loading of external input files:
 
 1. **requirements.json**  — top-level design requirements and operating point
-2. **materials.xlsx**     — material properties and LPBF machine constraints
 
 Maps to UML class: **Loader**
 
@@ -24,16 +23,13 @@ from parapy.core import Base, Input, Attribute
 class Loader(Base):
     """Load and validate external input files.
 
-    After instantiation, access ``requirements`` and ``materials`` to get
-    the parsed data.  ``errors`` collects any parse / validation problems
+    After instantiation, access ``requirements`` to get the parsed data.  ``errors`` collects any parse / validation problems
     so the GUI can surface them all at once.
     """
 
     #: Path to the JSON requirements file
     json_path: str = Input("inputs/requirements.json")
 
-    #: Path to the Excel material/machine constraints file
-    xlsx_path: str = Input("inputs/materials.xlsx")
 
     # ── JSON ─────────────────────────────────────────────────────────
 
@@ -57,39 +53,6 @@ class Loader(Base):
 
     # ── Excel ────────────────────────────────────────────────────────
 
-    @Attribute
-    def materials(self) -> list[dict[str, Any]]:
-        """List of material rows from the first sheet of the xlsx.
-
-        Each row becomes a dict keyed by column header.
-        Returns ``[]`` if the file is missing or openpyxl is not installed.
-        """
-        p = Path(self.xlsx_path)
-        if not p.is_file():
-            return []
-        try:
-            import openpyxl
-        except ImportError:
-            return [{"_error": "openpyxl not installed"}]
-
-        try:
-            wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
-            ws = wb.active
-            rows = list(ws.iter_rows(values_only=True))
-            wb.close()
-            if len(rows) < 2:
-                return []
-            headers = [str(h).strip() for h in rows[0]]
-            return [
-                {h: cell for h, cell in zip(headers, row)}
-                for row in rows[1:]
-            ]
-        except Exception as exc:
-            return [{"_error": str(exc)}]
-
-    @Attribute
-    def xlsx_available(self) -> bool:
-        return Path(self.xlsx_path).is_file()
 
     # ── convenience ──────────────────────────────────────────────────
 
@@ -100,9 +63,6 @@ class Loader(Base):
         req = self.requirements
         if "_error" in req:
             errs.append(f"JSON load error: {req['_error']}")
-        for row in self.materials:
-            if "_error" in row:
-                errs.append(f"Excel load error: {row['_error']}")
         return errs
 
     def get(self, key: str, default=None):
