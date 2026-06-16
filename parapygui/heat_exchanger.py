@@ -142,6 +142,14 @@ class HeatExchanger(GeomBase):
     opt_dissipation:      float = Input(0.0, label="Opt Dissipation (W)")
     opt_mean_temp:        float = Input(0.0, label="Opt Mean Temp (K)")
 
+    # ── optimised wavenumber field (synced from server after CFD run) ──
+    # Empty list = not yet synced; gyroid_preview falls back to uniform baseline.
+
+    opt_ctrl_locations: list = Input([], label="Optimised ctrl-point locations (m)")
+    opt_kx: list = Input([], label="Optimised kx field (rad/m) per ctrl point")
+    opt_ky: list = Input([], label="Optimised ky field (rad/m) per ctrl point")
+    opt_kz: list = Input([], label="Optimised kz field (rad/m) per ctrl point")
+
     # ═════════════════════════════════════════════════════════════════
     # Parts  (product tree)
     # ═════════════════════════════════════════════════════════════════
@@ -251,18 +259,19 @@ class HeatExchanger(GeomBase):
     def gyroid_preview(self):
         """Live TPMS gyroid mesh for the current design point.
 
-        Drives the design-space exploration: changing wavenumber, iso_level
-        or geometry inputs regenerates this mesh.  Solidity, mass and surface
-        area are read straight off it.
+        Uses the optimised kx/ky/kz field (opt_kx/ky/kz inputs) when it has
+        been synced from the server, otherwise falls back to the uniform
+        initial_wavenumber baseline.  Solidity, mass and surface area are
+        read straight off this mesh.
         """
         return GyroidMesh(
             length=self.enc_length - 2 * self.enc_wall_thickness,
             width=self.enc_width - 2 * self.enc_wall_thickness,
             height=self.enc_height - 2 * self.enc_wall_thickness,
-            ctrl_locations=self.lattice.frequency_field.ctrl_locations,
-            kx=self.lattice.frequency_field.kx,
-            ky=self.lattice.frequency_field.ky,
-            kz=self.lattice.frequency_field.kz,
+            ctrl_locations=self._eff_ctrl,
+            kx=self._eff_kx,
+            ky=self._eff_ky,
+            kz=self._eff_kz,
             tpms_type=self.tpms_type,
             iso_level=self.iso_level,
             resolution=self.preview_resolution,
@@ -314,6 +323,26 @@ class HeatExchanger(GeomBase):
         """Re at the laminar simulation inlet conditions."""
         dh = self.encapsulation.hydraulic_diameter
         return self.inflow_velocity * dh / self.fluid.kinematic_viscosity
+
+    @Attribute
+    def _eff_ctrl(self):
+        """Effective ctrl-point locations: optimised if available, else baseline 2×2×2 grid."""
+        return self.opt_ctrl_locations if self.opt_ctrl_locations else self._ctrl_points
+
+    @Attribute
+    def _eff_kx(self):
+        """Effective kx field: optimised if available, else uniform initial_wavenumber."""
+        return self.opt_kx if self.opt_kx else [self.initial_wavenumber] * len(self._ctrl_points)
+
+    @Attribute
+    def _eff_ky(self):
+        """Effective ky field: optimised if available, else uniform initial_wavenumber."""
+        return self.opt_ky if self.opt_ky else [self.initial_wavenumber] * len(self._ctrl_points)
+
+    @Attribute
+    def _eff_kz(self):
+        """Effective kz field: optimised if available, else uniform initial_wavenumber."""
+        return self.opt_kz if self.opt_kz else [self.initial_wavenumber] * len(self._ctrl_points)
 
     @Attribute
     def _ctrl_points(self) -> list[tuple[float, float, float]]:
@@ -461,6 +490,8 @@ class HeatExchanger(GeomBase):
     def export_lattice_stl(self, high_res: bool = True) -> str:
         """Write the locally-generated gyroid lattice to STL.
 
+        Uses the optimised kx/ky/kz field when available (synced via wizard
+        "Sync Opt Field" button), otherwise the uniform baseline wavenumber.
         Uses ``export_resolution`` when ``high_res`` is True (slow, fine),
         otherwise the live preview resolution.  Returns the file path.
         """
@@ -469,10 +500,10 @@ class HeatExchanger(GeomBase):
                 length=self.enc_length - 2 * self.enc_wall_thickness,
                 width=self.enc_width - 2 * self.enc_wall_thickness,
                 height=self.enc_height - 2 * self.enc_wall_thickness,
-                ctrl_locations=self.lattice.frequency_field.ctrl_locations,
-                kx=self.lattice.frequency_field.kx,
-                ky=self.lattice.frequency_field.ky,
-                kz=self.lattice.frequency_field.kz,
+                ctrl_locations=self._eff_ctrl,
+                kx=self._eff_kx,
+                ky=self._eff_ky,
+                kz=self._eff_kz,
                 tpms_type=self.tpms_type,
                 iso_level=self.iso_level,
                 resolution=self.export_resolution,

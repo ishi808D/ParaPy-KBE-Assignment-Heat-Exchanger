@@ -135,10 +135,15 @@ class WorkflowWizard(WorkflowWizardFrame):
         # (spinner, parapy_attr, fallback, multiply_for_display)
         pairs = [
             # geometry: m → mm
-            (self.m_spinSizeX,     "enc_length",          0.10, 1000),
-            (self.m_spinSizeY,     "enc_width",           0.05, 1000),
-            (self.m_spinSizeZ,     "enc_height",          0.05, 1000),
+            (self.m_spinSizeX,     "enc_length",          0.10,  1000),
+            (self.m_spinSizeY,     "enc_width",           0.05,  1000),
+            (self.m_spinSizeZ,     "enc_height",          0.05,  1000),
             (self.m_spinEncapWall, "enc_wall_thickness",  0.002, 1000),
+            # port bore sizes: m → mm
+            (self.m_spinInWinSX,   "inlet_bore_width",    0.010, 1000),
+            (self.m_spinInWinSY,   "inlet_bore_height",   0.015, 1000),
+            (self.m_spinOutWinSX,  "outlet_bore_width",   0.010, 1000),
+            (self.m_spinOutWinSY,  "outlet_bore_height",  0.015, 1000),
             # inlet / outlet (no conversion)
             (self.m_spinInletVel,  "inflow_velocity",     2.0,  1),
             (self.m_spinInletTemp, "inflow_temperature",  380,  1),
@@ -160,10 +165,18 @@ class WorkflowWizard(WorkflowWizardFrame):
             spinner.SetValue(float(val) * scale)
 
         # cores is a SpinCtrl (int), not SpinCtrlDouble
+        self.m_spinCores.SetValue(8)
+
+        # no_overhang and opt_mode
         try:
-            self.m_spinCores.SetValue(int(getattr(obj, "parallel_cores", 10)))
+            self.m_chkNoOverhang.SetValue(bool(getattr(obj, "no_overhang", False)))
         except Exception:
-            self.m_spinCores.SetValue(10)
+            pass
+        try:
+            mode = getattr(obj, "opt_mode", "pressure")
+            self.m_radioMode.SetSelection(0 if mode == "pressure" else 1)
+        except Exception:
+            pass
 
         # kinematic viscosity and density come from the fluid Part
         try:
@@ -172,6 +185,24 @@ class WorkflowWizard(WorkflowWizardFrame):
         except Exception:
             self.m_spinNu.SetValue(1e-6)
             self.m_spinRhoFluid.SetValue(1000.0)
+
+        # lattice preview parameters
+        try:
+            import math
+            k = float(getattr(obj, "initial_wavenumber", 628.0))
+            self.m_spinUnitCellMM.SetValue(2 * math.pi / k * 1000 if k > 0 else 10.0)
+        except Exception:
+            self.m_spinUnitCellMM.SetValue(10.0)
+        try:
+            self.m_spinIsoLevel.SetValue(float(getattr(obj, "iso_level", 0.3)))
+        except Exception:
+            self.m_spinIsoLevel.SetValue(0.3)
+        try:
+            tpms = getattr(obj, "tpms_type", "gyroid")
+            choices = ["gyroid", "schwartz_p", "diamond"]
+            self.m_choiceTpms.SetSelection(choices.index(tpms) if tpms in choices else 0)
+        except Exception:
+            pass
 
     def _write_gui_to_parapy(self):
         """Push GUI spinner values back to ParaPy @Inputs.
@@ -186,6 +217,10 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinSizeY,     "enc_width",          1000),
             (self.m_spinSizeZ,     "enc_height",         1000),
             (self.m_spinEncapWall, "enc_wall_thickness", 1000),
+            (self.m_spinInWinSX,   "inlet_bore_width",   1000),
+            (self.m_spinInWinSY,   "inlet_bore_height",  1000),
+            (self.m_spinOutWinSX,  "outlet_bore_width",  1000),
+            (self.m_spinOutWinSY,  "outlet_bore_height", 1000),
             (self.m_spinInletVel,  "inflow_velocity",    1),
             (self.m_spinInletTemp, "inflow_temperature", 1),
             (self.m_spinOutletP,   "outlet_pressure",    1),
@@ -199,11 +234,34 @@ class WorkflowWizard(WorkflowWizardFrame):
             (self.m_spinKbound,    "kbound",         1),
         ]
         for spinner, attr, scale in pairs:
-            try: setattr(obj, attr, spinner.GetValue() / scale)
-            except Exception: pass
-        # cores
-        try: setattr(obj, "parallel_cores", self.m_spinCores.GetValue())
-        except Exception: pass
+            try:
+                setattr(obj, attr, spinner.GetValue() / scale)
+            except Exception as e:
+                print(f"[workflow] _write_gui_to_parapy: {attr} — {e}")
+        try:
+            obj.no_overhang = bool(self.m_chkNoOverhang.GetValue())
+        except Exception as e:
+            print(f"[workflow] _write_gui_to_parapy: no_overhang — {e}")
+        try:
+            obj.opt_mode = "pressure" if self.m_radioMode.GetSelection() == 0 else "heat"
+        except Exception as e:
+            print(f"[workflow] _write_gui_to_parapy: opt_mode — {e}")
+        # lattice preview
+        import math
+        try:
+            uc_mm = self.m_spinUnitCellMM.GetValue()
+            obj.initial_wavenumber = 2 * math.pi / (uc_mm / 1000) if uc_mm > 0 else 628.0
+        except Exception as e:
+            print(f"[workflow] _write_gui_to_parapy: initial_wavenumber — {e}")
+        try:
+            obj.iso_level = self.m_spinIsoLevel.GetValue()
+        except Exception as e:
+            print(f"[workflow] _write_gui_to_parapy: iso_level — {e}")
+        try:
+            choices = ["gyroid", "schwartz_p", "diamond"]
+            obj.tpms_type = choices[self.m_choiceTpms.GetSelection()]
+        except Exception as e:
+            print(f"[workflow] _write_gui_to_parapy: tpms_type — {e}")
 
     def _update_parapy_geometry(self):
         """Force ParaPy to recompute geometry after wizard values change.
@@ -215,26 +273,36 @@ class WorkflowWizard(WorkflowWizardFrame):
         if not obj:
             return
 
-        # Write geometry dimensions (mm → m conversion)
-        try:
-            obj.enc_length = self.m_spinSizeX.GetValue() / 1000
-            obj.enc_width = self.m_spinSizeY.GetValue() / 1000
-            obj.enc_height = self.m_spinSizeZ.GetValue() / 1000
-            obj.enc_wall_thickness = self.m_spinEncapWall.GetValue() / 1000
-        except Exception as e:
-            print(f"[workflow] geometry update: {e}")
-
-        # Write optimization results if available
-        for attr, val in [
+        import math
+        uc_mm = self.m_spinUnitCellMM.GetValue()
+        choices = ["gyroid", "schwartz_p", "diamond"]
+        geo_writes = [
+            ("enc_length",         self.m_spinSizeX.GetValue()     / 1000),
+            ("enc_width",          self.m_spinSizeY.GetValue()     / 1000),
+            ("enc_height",         self.m_spinSizeZ.GetValue()     / 1000),
+            ("enc_wall_thickness", self.m_spinEncapWall.GetValue() / 1000),
+            ("inlet_bore_width",   self.m_spinInWinSX.GetValue()   / 1000),
+            ("inlet_bore_height",  self.m_spinInWinSY.GetValue()   / 1000),
+            ("outlet_bore_width",  self.m_spinOutWinSX.GetValue()  / 1000),
+            ("outlet_bore_height", self.m_spinOutWinSY.GetValue()  / 1000),
+            ("initial_wavenumber", 2 * math.pi / (uc_mm / 1000) if uc_mm > 0 else 628.0),
+            ("iso_level",          self.m_spinIsoLevel.GetValue()),
+            ("tpms_type",          choices[self.m_choiceTpms.GetSelection()]),
             ("baseline_dissipation", getattr(self, "_final_dissip", 0)),
-            ("baseline_mean_temp", getattr(self, "_final_meanT", 0)),
-        ]:
+            ("baseline_mean_temp",   getattr(self, "_final_meanT",  0)),
+        ]
+        errors = []
+        for attr, val in geo_writes:
             try:
                 setattr(obj, attr, val)
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append(f"{attr}: {e}")
+                print(f"[workflow] _update_parapy_geometry: {attr} — {e}")
 
-        self.m_statusLabel.SetLabel("ParaPy model updated — check 3D viewport.")
+        if errors:
+            self.m_statusLabel.SetLabel(f"Partial update — {errors[0]}")
+        else:
+            self.m_statusLabel.SetLabel("ParaPy model updated — check 3D viewport.")
 
     def onCellsChanged(self, event):
         """Update the total cell count label when any cell spinner changes."""
@@ -445,10 +513,10 @@ class WorkflowWizard(WorkflowWizardFrame):
 
     def onApplyGeom(self, event):
         self._write_gui_to_parapy()
-        self.m_statusLabel.SetLabel("Applied to ParaPy model.")
+        self._update_parapy_geometry()
 
     def onLoadJSON(self, event):
-        """Load configuration from a JSON file."""
+        """Load configuration from a JSON file (server YAML structure)."""
         import json
         from pathlib import Path
         inputs_dir = Path("inputs")
@@ -460,76 +528,162 @@ class WorkflowWizard(WorkflowWizardFrame):
             try:
                 with open(dlg.GetPath()) as f:
                     cfg = json.load(f)
-                # Map JSON keys → spinner values
-                spinner_map = {
-                    "domain_size_x": (self.m_spinSizeX, 1),
-                    "domain_size_y": (self.m_spinSizeY, 1),
-                    "domain_size_z": (self.m_spinSizeZ, 1),
-                    "inlet_velocity": (self.m_spinInletVel, 1),
-                    "inlet_temperature": (self.m_spinInletTemp, 1),
-                    "outlet_pressure": (self.m_spinOutletP, 1),
-                    "exterior_temperature": (self.m_spinTexterior, 1),
-                    "initial_temperature": (self.m_spinTinitial, 1),
-                    "encap_wall_mm": (self.m_spinEncapWall, 1),
-                    "meantT_max": (self.m_spinMeanTMax, 1),
-                    "dissPower_max": (self.m_spinDissPMax, 1),
-                    "opt_wall_cells": (self.m_spinWallCells, 1),
-                    "opt_unit_cells": (self.m_spinUnitCells, 1),
-                    "am_theta": (self.m_spinAmTheta, 1),
-                    "max_iterations": (self.m_spinMaxIter, 1),
-                    "kbound": (self.m_spinKbound, 1),
-                }
-                for key, (spinner, _) in spinner_map.items():
-                    if key in cfg:
-                        spinner.SetValue(float(cfg[key]))
-                if "parallel_cores" in cfg:
-                    self.m_spinCores.SetValue(int(cfg["parallel_cores"]))
-                if "opt_mode" in cfg:
-                    self.m_radioMode.SetSelection(
-                        0 if cfg["opt_mode"] == "pressure" else 1)
+                geo  = cfg.get("geometry", {})
+                inl  = cfg.get("inlet", {})
+                out  = cfg.get("outlet", {})
+                mat  = cfg.get("material", {})
+                thm  = cfg.get("thermal", {})
+                opt  = cfg.get("optimization", {})
+                run  = cfg.get("run", {})
+
+                sz = geo.get("size_mm")
+                if sz and len(sz) == 3:
+                    self.m_spinSizeX.SetValue(sz[0])
+                    self.m_spinSizeY.SetValue(sz[1])
+                    self.m_spinSizeZ.SetValue(sz[2])
+                cells = geo.get("cells")
+                if cells and len(cells) == 3:
+                    self.m_spinCellsX.SetValue(int(cells[0]))
+                    self.m_spinCellsY.SetValue(int(cells[1]))
+                    self.m_spinCellsZ.SetValue(int(cells[2]))
+                if "encap_wall_mm" in geo:
+                    self.m_spinEncapWall.SetValue(geo["encap_wall_mm"])
+
+                if "velocity_magnitude" in inl:
+                    self.m_spinInletVel.SetValue(inl["velocity_magnitude"])
+                if "temperature" in inl:
+                    self.m_spinInletTemp.SetValue(inl["temperature"])
+                iwo = inl.get("window_origin_mm")
+                if iwo and len(iwo) == 2:
+                    self.m_spinInWinOX.SetValue(iwo[0])
+                    self.m_spinInWinOY.SetValue(iwo[1])
+                iws = inl.get("window_size_mm")
+                if iws and len(iws) == 2:
+                    self.m_spinInWinSX.SetValue(iws[0])
+                    self.m_spinInWinSY.SetValue(iws[1])
+
+                if "pressure" in out:
+                    self.m_spinOutletP.SetValue(out["pressure"])
+                owo = out.get("window_origin_mm")
+                if owo and len(owo) == 2:
+                    self.m_spinOutWinOX.SetValue(owo[0])
+                    self.m_spinOutWinOY.SetValue(owo[1])
+                ows = out.get("window_size_mm")
+                if ows and len(ows) == 2:
+                    self.m_spinOutWinSX.SetValue(ows[0])
+                    self.m_spinOutWinSY.SetValue(ows[1])
+
+                if "Texterior" in mat:
+                    self.m_spinTexterior.SetValue(mat["Texterior"])
+                if "nu" in mat:
+                    self.m_spinNu.SetValue(mat["nu"])
+                if "rho_fluid" in mat:
+                    self.m_spinRhoFluid.SetValue(mat["rho_fluid"])
+
+                if "initial_temperature" in thm:
+                    self.m_spinTinitial.SetValue(thm["initial_temperature"])
+
+                if "mode" in opt:
+                    self.m_radioMode.SetSelection(0 if opt["mode"] == "pressure" else 1)
+                if "meantT_max" in opt:
+                    self.m_spinMeanTMax.SetValue(opt["meantT_max"])
+                if "dissPower_max" in opt:
+                    self.m_spinDissPMax.SetValue(opt["dissPower_max"])
+                if "wall" in opt:
+                    self.m_spinWallCells.SetValue(opt["wall"])
+                if "unit" in opt:
+                    self.m_spinUnitCells.SetValue(opt["unit"])
+                if "am_theta" in opt:
+                    self.m_spinAmTheta.SetValue(opt["am_theta"])
+                if "no_overhang" in opt:
+                    self.m_chkNoOverhang.SetValue(bool(opt["no_overhang"]))
+                if "kbound" in opt:
+                    self.m_spinKbound.SetValue(opt["kbound"])
+
+                if "iters" in run:
+                    self.m_spinMaxIter.SetValue(run["iters"])
+                if "parallel" in run:
+                    self.m_spinCores.SetValue(int(run["parallel"]))
+
                 self.m_statusLabel.SetLabel(f"Loaded: {dlg.GetPath()}")
             except Exception as e:
                 wx.MessageBox(f"Failed to load:\n{e}", "Error", wx.OK|wx.ICON_ERROR)
         dlg.Destroy()
 
     def onSaveJSON(self, event):
-        """Save current configuration to a JSON file."""
+        """Save current configuration to inputs/config.json."""
         import json
         from pathlib import Path
-        outputs_dir = Path("outputs")
-        outputs_dir.mkdir(exist_ok=True)
-        dlg = wx.FileDialog(self, "Save Configuration", str(outputs_dir),
-                            defaultFile="config.json",
-                            wildcard="JSON files (*.json)|*.json",
-                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
-        if dlg.ShowModal() == wx.ID_OK:
+        inputs_dir = Path("inputs")
+        inputs_dir.mkdir(exist_ok=True)
+        path = inputs_dir / "config.json"
+        if True:
             cfg = {
-                "domain_size_x": self.m_spinSizeX.GetValue(),
-                "domain_size_y": self.m_spinSizeY.GetValue(),
-                "domain_size_z": self.m_spinSizeZ.GetValue(),
-                "inlet_velocity": self.m_spinInletVel.GetValue(),
-                "inlet_temperature": self.m_spinInletTemp.GetValue(),
-                "outlet_pressure": self.m_spinOutletP.GetValue(),
-                "exterior_temperature": self.m_spinTexterior.GetValue(),
-                "initial_temperature": self.m_spinTinitial.GetValue(),
-                "encap_wall_mm": self.m_spinEncapWall.GetValue(),
-                "meantT_max": self.m_spinMeanTMax.GetValue(),
-                "dissPower_max": self.m_spinDissPMax.GetValue(),
-                "opt_wall_cells": int(self.m_spinWallCells.GetValue()),
-                "opt_unit_cells": int(self.m_spinUnitCells.GetValue()),
-                "am_theta": self.m_spinAmTheta.GetValue(),
-                "max_iterations": int(self.m_spinMaxIter.GetValue()),
-                "parallel_cores": self.m_spinCores.GetValue(),
-                "kbound": self.m_spinKbound.GetValue(),
-                "opt_mode": "pressure" if self.m_radioMode.GetSelection() == 0 else "heat",
+                "geometry": {
+                    "size_mm": [
+                        self.m_spinSizeX.GetValue(),
+                        self.m_spinSizeY.GetValue(),
+                        self.m_spinSizeZ.GetValue(),
+                    ],
+                    "cells": [
+                        int(self.m_spinCellsX.GetValue()),
+                        int(self.m_spinCellsY.GetValue()),
+                        int(self.m_spinCellsZ.GetValue()),
+                    ],
+                    "encap_wall_mm": self.m_spinEncapWall.GetValue(),
+                },
+                "inlet": {
+                    "velocity_magnitude": self.m_spinInletVel.GetValue(),
+                    "temperature":        self.m_spinInletTemp.GetValue(),
+                    "window_origin_mm": [
+                        self.m_spinInWinOX.GetValue(),
+                        self.m_spinInWinOY.GetValue(),
+                    ],
+                    "window_size_mm": [
+                        self.m_spinInWinSX.GetValue(),
+                        self.m_spinInWinSY.GetValue(),
+                    ],
+                },
+                "outlet": {
+                    "pressure": self.m_spinOutletP.GetValue(),
+                    "window_origin_mm": [
+                        self.m_spinOutWinOX.GetValue(),
+                        self.m_spinOutWinOY.GetValue(),
+                    ],
+                    "window_size_mm": [
+                        self.m_spinOutWinSX.GetValue(),
+                        self.m_spinOutWinSY.GetValue(),
+                    ],
+                },
+                "material": {
+                    "Texterior": self.m_spinTexterior.GetValue(),
+                    "nu":        self.m_spinNu.GetValue(),
+                    "rho_fluid": self.m_spinRhoFluid.GetValue(),
+                },
+                "thermal": {
+                    "initial_temperature": self.m_spinTinitial.GetValue(),
+                },
+                "optimization": {
+                    "mode":          "pressure" if self.m_radioMode.GetSelection() == 0 else "heat",
+                    "meantT_max":    self.m_spinMeanTMax.GetValue(),
+                    "dissPower_max": self.m_spinDissPMax.GetValue(),
+                    "wall":          int(self.m_spinWallCells.GetValue()),
+                    "unit":          int(self.m_spinUnitCells.GetValue()),
+                    "am_theta":      self.m_spinAmTheta.GetValue(),
+                    "no_overhang":   self.m_chkNoOverhang.GetValue(),
+                    "kbound":        self.m_spinKbound.GetValue(),
+                },
+                "run": {
+                    "iters":    int(self.m_spinMaxIter.GetValue()),
+                    "parallel": int(self.m_spinCores.GetValue()),
+                },
             }
             try:
-                with open(dlg.GetPath(), "w") as f:
+                with open(path, "w") as f:
                     json.dump(cfg, f, indent=2)
-                self.m_statusLabel.SetLabel(f"Saved: {dlg.GetPath()}")
+                self.m_statusLabel.SetLabel(f"Config saved: {path}")
             except Exception as e:
                 wx.MessageBox(f"Failed to save:\n{e}", "Error", wx.OK|wx.ICON_ERROR)
-        dlg.Destroy()
 
     # =================================================================
     # Page 1: Semi-empirical sizing (reads ParaPy @Attributes)
@@ -895,16 +1049,14 @@ class WorkflowWizard(WorkflowWizardFrame):
     # =================================================================
 
     def onExportSTL(self, event):
-        """Download existing STL files from the container.
-        Only runs gyroid_to_stl.py if no files exist yet."""
-        dlg = wx.DirDialog(self, "Save STL files to:", style=wx.DD_DEFAULT_STYLE)
-        if dlg.ShowModal() == wx.ID_OK:
-            out_dir = dlg.GetPath()
-            self.m_btnExportSTL.Enable(False)
-            self.m_statusLabel.SetLabel("Downloading STL…")
-            threading.Thread(target=self._stl_download_worker,
-                             args=(out_dir,), daemon=True).start()
-        dlg.Destroy()
+        """Download existing STL files from the container to outputs/."""
+        from pathlib import Path
+        out_dir = str(Path("outputs"))
+        Path(out_dir).mkdir(exist_ok=True)
+        self.m_btnExportSTL.Enable(False)
+        self.m_statusLabel.SetLabel("Downloading STL…")
+        threading.Thread(target=self._stl_download_worker,
+                         args=(out_dir,), daemon=True).start()
 
     def _stl_download_worker(self, out_dir):
         from pathlib import Path
@@ -1066,35 +1218,33 @@ class WorkflowWizard(WorkflowWizardFrame):
             dlg.m_statusQM.SetLabel(f"Stop error: {e}")
 
     def _qm_download_obj(self, dlg):
-        """Download the OBJ file(s) from the server via DownloadNurbsFile."""
-        save_dlg = wx.DirDialog(self, "Save OBJ files to:")
-        if save_dlg.ShowModal() == wx.ID_OK:
-            out_dir = save_dlg.GetPath()
-            sheets = dlg.get_sheet_selection()
-            def worker():
-                from pathlib import Path
-                saved = []
-                for sheet in sheets:
-                    try:
-                        chunks = self._grpc.stub.DownloadNurbsFile(
-                            pb2.NurbsFileRequest(which=sheet, format="obj"))
-                        fh, path = None, None
-                        for chunk in chunks:
-                            if not path:
-                                path = Path(out_dir) / chunk.filename
-                                fh = open(path, "wb")
-                            fh.write(chunk.data)
-                        if fh:
-                            fh.close(); saved.append(str(path))
-                    except grpc.RpcError as e:
-                        wx.CallAfter(dlg.m_txtQMLog.AppendText,
-                                     f"Download {sheet} OBJ: {e}\n")
-                wx.CallAfter(dlg.m_statusQM.SetLabel,
-                             f"OBJ saved: {', '.join(saved) if saved else 'none'}")
-                if saved:
-                    self._last_obj_path = saved[0]
-            threading.Thread(target=worker, daemon=True).start()
-        save_dlg.Destroy()
+        """Download the OBJ file(s) from the server to outputs/."""
+        from pathlib import Path
+        out_dir = Path("outputs")
+        out_dir.mkdir(exist_ok=True)
+        sheets = dlg.get_sheet_selection()
+        def worker():
+            saved = []
+            for sheet in sheets:
+                try:
+                    chunks = self._grpc.stub.DownloadNurbsFile(
+                        pb2.NurbsFileRequest(which=sheet, format="obj"))
+                    fh, path = None, None
+                    for chunk in chunks:
+                        if not path:
+                            path = out_dir / chunk.filename
+                            fh = open(path, "wb")
+                        fh.write(chunk.data)
+                    if fh:
+                        fh.close(); saved.append(str(path))
+                except grpc.RpcError as e:
+                    wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                 f"Download {sheet} OBJ: {e}\n")
+            wx.CallAfter(dlg.m_statusQM.SetLabel,
+                         f"OBJ saved to outputs/: {', '.join(saved) if saved else 'none'}")
+            if saved:
+                self._last_obj_path = saved[0]
+        threading.Thread(target=worker, daemon=True).start()
 
     def _qm_nurbs(self, dlg):
         """Run quad_to_nurbs.py on the server to convert OBJ → STEP."""
@@ -1144,37 +1294,35 @@ class WorkflowWizard(WorkflowWizardFrame):
         threading.Thread(target=worker, daemon=True).start()
 
     def _qm_download_step(self, dlg):
-        """Download the STEP file(s) from the server."""
-        save_dlg = wx.DirDialog(self, "Save STEP files to:")
-        if save_dlg.ShowModal() == wx.ID_OK:
-            out_dir = save_dlg.GetPath()
-            sheets = dlg.get_sheet_selection()
-            def worker():
-                from pathlib import Path
-                saved = []
-                for sheet in sheets:
-                    try:
-                        chunks = self._grpc.stub.DownloadNurbsFile(
-                            pb2.NurbsFileRequest(which=sheet, format="step"))
-                        fh, path = None, None
-                        for chunk in chunks:
-                            if not path:
-                                path = Path(out_dir) / chunk.filename
-                                fh = open(path, "wb")
-                            fh.write(chunk.data)
-                        if fh:
-                            fh.close(); saved.append(str(path))
-                    except grpc.RpcError as e:
-                        wx.CallAfter(dlg.m_txtQMLog.AppendText,
-                                     f"Download {sheet} STEP: {e}\n")
-                wx.CallAfter(dlg.m_statusQM.SetLabel,
-                             f"STEP saved: {', '.join(saved) if saved else 'none'}")
-                if saved:
-                    wx.CallAfter(wx.MessageBox,
-                                 "STEP files saved:\n" + "\n".join(saved),
-                                 "STEP Download", wx.OK | wx.ICON_INFORMATION)
-            threading.Thread(target=worker, daemon=True).start()
-        save_dlg.Destroy()
+        """Download the STEP file(s) from the server to outputs/."""
+        from pathlib import Path
+        out_dir = Path("outputs")
+        out_dir.mkdir(exist_ok=True)
+        sheets = dlg.get_sheet_selection()
+        def worker():
+            saved = []
+            for sheet in sheets:
+                try:
+                    chunks = self._grpc.stub.DownloadNurbsFile(
+                        pb2.NurbsFileRequest(which=sheet, format="step"))
+                    fh, path = None, None
+                    for chunk in chunks:
+                        if not path:
+                            path = out_dir / chunk.filename
+                            fh = open(path, "wb")
+                        fh.write(chunk.data)
+                    if fh:
+                        fh.close(); saved.append(str(path))
+                except grpc.RpcError as e:
+                    wx.CallAfter(dlg.m_txtQMLog.AppendText,
+                                 f"Download {sheet} STEP: {e}\n")
+            wx.CallAfter(dlg.m_statusQM.SetLabel,
+                         f"STEP saved to outputs/: {', '.join(saved) if saved else 'none'}")
+            if saved:
+                wx.CallAfter(wx.MessageBox,
+                             "STEP files saved:\n" + "\n".join(saved),
+                             "STEP Download", wx.OK | wx.ICON_INFORMATION)
+        threading.Thread(target=worker, daemon=True).start()
 
     def _qm_render_preview(self, dlg):
         """Download OBJ to temp dir and render preview into the dialog's WebView."""
@@ -1466,6 +1614,83 @@ class WorkflowWizard(WorkflowWizardFrame):
             threading.Thread(target=worker, daemon=True).start()
         dlg.Destroy()
 
+    def onSyncOptimizedField(self, event):
+        """Read the post-optimization kx/ky/kz field from the server config and
+        apply it to the ParaPy HeatExchanger, triggering a live viewport update.
+        """
+        self.m_statusLabel.SetLabel("Fetching optimised field from server…")
+
+        def worker():
+            try:
+                import ast
+                try:
+                    import yaml
+                except ImportError:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 "PyYAML not installed — run: pip install pyyaml")
+                    return
+
+                resp = self._grpc.stub.GetConfig(pb2.Empty())
+                if not resp.success:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"GetConfig failed: {resp.error}")
+                    return
+
+                cfg = yaml.safe_load(resp.yaml_content)
+                lat = cfg.get("lattice", {})
+
+                def _parse(v):
+                    """Accept a YAML list, a Python-repr string, or None."""
+                    if isinstance(v, list):
+                        return v
+                    if isinstance(v, str) and v.strip():
+                        try:
+                            return ast.literal_eval(v)
+                        except Exception:
+                            return []
+                    return []
+
+                kx   = _parse(lat.get("kx_values"))
+                ky   = _parse(lat.get("ky_values"))
+                kz   = _parse(lat.get("kz_values"))
+                ctrl = _parse(lat.get("ctrl_locations"))
+
+                if not kx:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 "lattice.kx_values not found in server config — "
+                                 "run the optimisation first.")
+                    return
+
+                obj = self.parapy_obj
+                if not obj:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 "No ParaPy object attached — field not synced.")
+                    return
+
+                try:
+                    obj.opt_kx = kx
+                    obj.opt_ky = ky if ky else kx
+                    obj.opt_kz = kz if kz else kx
+                    if ctrl:
+                        obj.opt_ctrl_locations = ctrl
+                except Exception as e:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"ParaPy sync error: {e}")
+                    return
+
+                n = len(kx)
+                all_k = kx + (ky or kx) + (kz or kx)
+                k_mean = sum(all_k) / len(all_k)
+                uc_mm = 6283.2 / k_mean if k_mean > 0 else 10.0  # 2π/k * 1000
+                wx.CallAfter(self.m_statusLabel.SetLabel,
+                             f"Optimised field synced: {n} ctrl pts, "
+                             f"mean unit cell {uc_mm:.1f} mm — check 3D viewport.")
+
+            except Exception as e:
+                wx.CallAfter(self.m_statusLabel.SetLabel, f"Sync error: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def onRunPySLM(self, event):
         """Run PySLM manufacturability analysis on the downloaded STL."""
         paths = getattr(self, "_last_stl_paths", [])
@@ -1514,8 +1739,15 @@ class WorkflowWizard(WorkflowWizardFrame):
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_pyslm_report(self, report):
-        """Show PySLM results in a dialog."""
-        self.m_statusLabel.SetLabel("PySLM analysis complete.")
+        """Show PySLM results in a dialog and save to outputs/pyslm_report.txt."""
+        from pathlib import Path
+        out_path = Path("outputs") / "pyslm_report.txt"
+        Path("outputs").mkdir(exist_ok=True)
+        try:
+            out_path.write_text(report, encoding="utf-8")
+            self.m_statusLabel.SetLabel(f"PySLM report saved: {out_path}")
+        except Exception:
+            self.m_statusLabel.SetLabel("PySLM analysis complete.")
         dlg = wx.Dialog(self, title="PySLM Manufacturability Report",
                         size=(500, 400), style=wx.DEFAULT_DIALOG_STYLE|wx.RESIZE_BORDER)
         sz = wx.BoxSizer(wx.VERTICAL)
@@ -1528,30 +1760,148 @@ class WorkflowWizard(WorkflowWizardFrame):
         dlg.ShowModal()
         dlg.Destroy()
 
+    # =================================================================
+    # Page 6: Print Preparation (server-side PySLM)
+    # =================================================================
+
+    def onRunPrintPrep(self, event):
+        """Launch gyroid_print_prep.py on the server and stream its output."""
+        extra_args = [
+            "--num-workers", str(self.m_spinPPWorkers.GetValue()),
+            "--max-bridge-length", f"{self.m_spinPPBridge.GetValue():.3g}",
+        ]
+        sel = self.m_choicePPBuildDir.GetSelection()
+        build_dir = ["z", "x", "y"][sel] if sel < 3 else self.m_txtPPCustomDir.GetValue().strip()
+        extra_args += ["--build-direction", build_dir]
+        if self.m_chkPPSkipTime.GetValue():
+            extra_args.append("--skip-print-time")
+
+        self.m_btnRunPrintPrep.Enable(False)
+        self.m_btnStopPrintPrep.Enable(True)
+        self.m_btnDownloadBuildSTL.Enable(False)
+        self.m_btnDownloadOverhangSTL.Enable(False)
+        self.m_btnDownloadSupportsSTL.Enable(False)
+        self.m_txtPrintPrepLog.Clear()
+        self.m_statusLabel.SetLabel("Starting print preparation…")
+
+        def worker():
+            try:
+                stub = self._grpc.stub
+                resp = stub.StartPrintPrep(pb2.PrintPrepRequest(extra_args=extra_args))
+                wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
+                             f"args: {' '.join(extra_args)}\nStarted: {resp.message}\n")
+                if not resp.success:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"Print prep failed: {resp.message}")
+                    wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
+                    wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
+                    return
+
+                had_error = False
+                try:
+                    for line in stub.StreamPrintPrepOutput(pb2.Empty()):
+                        ts = time.strftime("%H:%M:%S",
+                                          time.localtime(line.timestamp_ms / 1000))
+                        wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
+                                     f"[{ts}] {line.line}\n")
+                        if line.line.startswith("ERROR:"):
+                            had_error = True
+                except grpc.RpcError:
+                    pass
+
+                wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
+                wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
+                if had_error:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 "Print prep FAILED — see log.")
+                else:
+                    wx.CallAfter(self.m_statusLabel.SetLabel, "Print prep complete.")
+                    wx.CallAfter(self.m_btnDownloadBuildSTL.Enable, True)
+                    wx.CallAfter(self.m_btnDownloadOverhangSTL.Enable, True)
+                    wx.CallAfter(self.m_btnDownloadSupportsSTL.Enable, True)
+
+            except grpc.RpcError as e:
+                msg = e.details() if hasattr(e, "details") else str(e)
+                wx.CallAfter(self.m_statusLabel.SetLabel, f"Print prep error: {msg}")
+                wx.CallAfter(self.m_txtPrintPrepLog.AppendText, f"\nERROR: {e}\n")
+                wx.CallAfter(self.m_btnRunPrintPrep.Enable, True)
+                wx.CallAfter(self.m_btnStopPrintPrep.Enable, False)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def onStopPrintPrep(self, event):
+        try:
+            self._grpc.stub.StopPrintPrep(pb2.Empty())
+            self.m_statusLabel.SetLabel("Print prep stopped.")
+        except Exception as e:
+            self.m_statusLabel.SetLabel(f"Stop error: {e}")
+        self.m_btnStopPrintPrep.Enable(False)
+        self.m_btnRunPrintPrep.Enable(True)
+
+    def _pp_download(self, which: str):
+        """Download a print-prep output STL (build/overhang/supports) to outputs/."""
+        from pathlib import Path
+        out_dir = Path("outputs")
+        out_dir.mkdir(exist_ok=True)
+        self.m_statusLabel.SetLabel(f"Downloading {which} STL…")
+
+        def worker():
+            try:
+                chunks = self._grpc.stub.DownloadPrintPrepFile(
+                    pb2.PrintPrepFileRequest(which=which))
+                fh, path = None, None
+                for chunk in chunks:
+                    if fh is None:
+                        path = out_dir / chunk.filename
+                        fh = open(path, "wb")
+                    fh.write(chunk.data)
+                if fh:
+                    fh.close()
+                    wx.CallAfter(self.m_statusLabel.SetLabel, f"Saved: {path}")
+                    wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
+                                 f"Downloaded {which} → {path}\n")
+                else:
+                    wx.CallAfter(self.m_statusLabel.SetLabel,
+                                 f"No data received for {which}")
+            except grpc.RpcError as e:
+                msg = e.details() if hasattr(e, "details") else str(e)
+                wx.CallAfter(self.m_statusLabel.SetLabel, f"Download error: {msg}")
+                wx.CallAfter(self.m_txtPrintPrepLog.AppendText,
+                             f"\nDownload {which} ERROR: {e}\n")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def onDownloadBuildSTL(self, event):
+        self._pp_download("build")
+
+    def onDownloadOverhangSTL(self, event):
+        self._pp_download("overhang")
+
+    def onDownloadSupportsSTL(self, event):
+        self._pp_download("supports")
+
     def onDownloadHistory(self, event):
-        """Download full optimization history and save as TSV."""
+        """Download full optimization history and save to outputs/history.tsv."""
+        from pathlib import Path
         try:
             hist = self._grpc.get_history()
             if not hist.success:
                 wx.MessageBox(f"Error: {hist.error}", "History", wx.OK|wx.ICON_ERROR); return
-            dlg = wx.FileDialog(self, "Save history", wildcard="TSV files (*.tsv)|*.tsv",
-                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
-            if dlg.ShowModal() == wx.ID_OK:
-                path = dlg.GetPath()
-                with open(path, "w") as f:
-                    f.write("\t".join(hist.columns) + "\n")
-                    for row in hist.rows:
-                        parts = []
-                        for col in hist.columns:
-                            if col in row.values:
-                                v = row.values[col]
-                                parts.append("nan" if math.isnan(v) else f"{v:g}")
-                            elif col in row.strings:
-                                parts.append(row.strings[col])
-                            else:
-                                parts.append("")
-                        f.write("\t".join(parts) + "\n")
-                self.m_statusLabel.SetLabel(f"History saved: {path}")
-            dlg.Destroy()
+            Path("outputs").mkdir(exist_ok=True)
+            path = Path("outputs") / "history.tsv"
+            with open(path, "w") as f:
+                f.write("\t".join(hist.columns) + "\n")
+                for row in hist.rows:
+                    parts = []
+                    for col in hist.columns:
+                        if col in row.values:
+                            v = row.values[col]
+                            parts.append("nan" if math.isnan(v) else f"{v:g}")
+                        elif col in row.strings:
+                            parts.append(row.strings[col])
+                        else:
+                            parts.append("")
+                    f.write("\t".join(parts) + "\n")
+            self.m_statusLabel.SetLabel(f"History saved: {path}")
         except grpc.RpcError as e:
             wx.MessageBox(f"gRPC error: {e.details()}", "History", wx.OK|wx.ICON_ERROR)

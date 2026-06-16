@@ -1,0 +1,60 @@
+{
+  "geometry": {
+    "size_mm": [
+      25.0,
+      25.0,
+      25.0
+    ],
+    "cells": [
+      25,
+      25,
+      25
+    ],
+    "encap_wall_mm": 3.0
+  },
+  "inlet": {
+    "velocity_magnitude": 0.1,
+    "temperature": 380.0,
+    "window_origin_mm": [
+      1.0,
+      1.0
+    ],
+    "window_size_mm": [
+      1.0,
+      2.0
+    ]
+  },
+  "outlet": {
+    "pressure": 0.0,
+    "window_origin_mm": [
+      12.0,
+      12.0
+    ],
+    "window_size_mm": [
+      1.0,
+      2.0
+    ]
+  },
+  "material": {
+    "Texterior": 270.0,
+    "nu": 1e-06,
+    "rho_fluid": 1000.0
+  },
+  "thermal": {
+    "initial_temperature": 270.0
+  },
+  "optimization": {
+    "mode": "heat",
+    "meantT_max": 303.0,
+    "dissPower_max": 9800.0,
+    "wall": 1,
+    "unit": 5,
+    "am_theta": 45.0,
+    "no_overhang": false,
+    "kbound": 1.0
+  },
+  "run": {
+    "iters": 1,
+    "parallel": 10
+  }
+}

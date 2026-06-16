@@ -19,7 +19,7 @@ _ = gettext.gettext
 class WorkflowWizardFrame ( wx.Frame ):
     """Wizard popup launched from ParaPy @action. Receives the ParaPy object."""
 
-    NUM_PAGES = 6
+    NUM_PAGES = 7
     PAGE_TITLES = [
         u"Step 1: Geometry & Boundary Conditions",
         u"Step 2: Semi-Empirical Sizing",
@@ -27,6 +27,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         u"Step 4: Optimizer Setup",
         u"Step 5: Optimization Monitor",
         u"Step 6: Results & Post-Processing",
+        u"Step 7: Print Preparation (PySLM)",
     ]
 
     def __init__( self, parent, parapy_obj=None ):
@@ -54,7 +55,8 @@ class WorkflowWizardFrame ( wx.Frame ):
         # =============================================================
         # PAGE 0 — Geometry & Boundary Conditions
         # =============================================================
-        self.m_panelGeom = wx.Panel(self.m_simplebook)
+        self.m_panelGeom = wx.ScrolledWindow(self.m_simplebook, style=wx.VSCROLL)
+        self.m_panelGeom.SetScrollRate(0, 10)
         szG = wx.BoxSizer(wx.VERTICAL)
 
         # -- domain size (geometry.size_mm) --
@@ -83,6 +85,22 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_spinEncapWall = wx.SpinCtrlDouble(sbEnc.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.5, 20, 3.0, 0.5)
         sbEnc.Add(self.m_spinEncapWall, 0, wx.ALL, 4)
         szG.Add(sbEnc, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- lattice preview --
+        sbLat = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Lattice Preview (ParaPy viewport)")), wx.HORIZONTAL)
+        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"Type:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_choiceTpms = wx.Choice(sbLat.GetStaticBox(), wx.ID_ANY, choices=[u"gyroid", u"schwartz_p", u"diamond"])
+        self.m_choiceTpms.SetSelection(0)
+        sbLat.Add(self.m_choiceTpms, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 4)
+        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"  Unit cell (mm):")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinUnitCellMM = wx.SpinCtrlDouble(sbLat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 1.0, 200.0, 10.0, 1.0)
+        self.m_spinUnitCellMM.SetToolTip(u"Unit cell size for the live gyroid preview (2π/k). Does not affect server mesh resolution.")
+        sbLat.Add(self.m_spinUnitCellMM, 0, wx.ALL, 4)
+        sbLat.Add(wx.StaticText(sbLat.GetStaticBox(), wx.ID_ANY, _(u"  Iso-level:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinIsoLevel = wx.SpinCtrlDouble(sbLat.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(80,-1), wx.SP_ARROW_KEYS, 0.01, 1.5, 0.3, 0.05)
+        self.m_spinIsoLevel.SetToolTip(u"Iso-level controls wall thickness / solidity of the TPMS sheet. Higher = thicker walls.")
+        sbLat.Add(self.m_spinIsoLevel, 0, wx.ALL, 4)
+        szG.Add(sbLat, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- inlet --
         sbIn = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Inlet")), wx.VERTICAL)
@@ -133,13 +151,22 @@ class WorkflowWizardFrame ( wx.Frame ):
         szG.Add(sbMat, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- run settings (applies to all simulations) --
-        sbRun = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Run Settings")), wx.HORIZONTAL)
-        sbRun.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
-        self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"10", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 10)
-        sbRun.Add(self.m_spinCores, 0, wx.ALL, 4)
-        sbRun.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        sbRun = wx.StaticBoxSizer(wx.StaticBox(self.m_panelGeom, wx.ID_ANY, _(u"Run Settings")), wx.VERTICAL)
+        szRunRow = wx.BoxSizer(wx.HORIZONTAL)
+        szRunRow.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"Parallel cores:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
+        self.m_spinCores = wx.SpinCtrl(sbRun.GetStaticBox(), wx.ID_ANY, u"8", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 64, 8)
+        szRunRow.Add(self.m_spinCores, 0, wx.ALL, 4)
+        szRunRow.Add(wx.StaticText(sbRun.GetStaticBox(), wx.ID_ANY, _(u"  Max iterations:")), 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 8)
         self.m_spinMaxIter = wx.SpinCtrlDouble(sbRun.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 1, 5000, 100, 10)
-        sbRun.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
+        szRunRow.Add(self.m_spinMaxIter, 0, wx.ALL, 4)
+        sbRun.Add(szRunRow, 0, wx.ALL, 4)
+        self.m_radioMode = wx.RadioBox(sbRun.GetStaticBox(), wx.ID_ANY,
+            _(u"Optimization mode"), wx.DefaultPosition, wx.DefaultSize,
+            [_(u"pressure  (min dissipation, temp ≤ meantT_max)"),
+             _(u"heat  (min mean temp, dissipation ≤ dissPower_max)")],
+            1, wx.RA_SPECIFY_COLS)
+        self.m_radioMode.SetSelection(0)
+        sbRun.Add(self.m_radioMode, 0, wx.EXPAND|wx.ALL, 5)
         szG.Add(sbRun, 0, wx.EXPAND|wx.ALL, 5)
 
         # -- file operations --
@@ -153,7 +180,7 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnApplyGeom = wx.Button(self.m_panelGeom, wx.ID_ANY, _(u"Apply to model"))
         szFileOps.Add(self.m_btnApplyGeom, 0, wx.ALL, 5)
         szG.Add(szFileOps, 0, wx.ALL, 5)
-        self.m_panelGeom.SetSizer(szG); self.m_panelGeom.Layout(); szG.Fit(self.m_panelGeom)
+        self.m_panelGeom.SetSizer(szG); self.m_panelGeom.Layout(); self.m_panelGeom.FitInside()
         self.m_simplebook.AddPage(self.m_panelGeom, u"Geometry", True)
 
         # =============================================================
@@ -213,14 +240,6 @@ class WorkflowWizardFrame ( wx.Frame ):
         # =============================================================
         self.m_panelOpt = wx.Panel(self.m_simplebook)
         szOpt = wx.BoxSizer(wx.VERTICAL)
-
-        self.m_radioMode = wx.RadioBox(self.m_panelOpt, wx.ID_ANY,
-            _(u"optimization.mode"), wx.DefaultPosition, wx.DefaultSize,
-            [_(u"pressure  (min dissipation, temp ≤ meantT_max)"),
-             _(u"heat  (min mean temp, dissipation ≤ dissPower_max)")],
-            1, wx.RA_SPECIFY_COLS)
-        self.m_radioMode.SetSelection(0)
-        szOpt.Add(self.m_radioMode, 0, wx.EXPAND|wx.ALL, 10)
 
         sbCstr = wx.StaticBoxSizer(wx.StaticBox(self.m_panelOpt, wx.ID_ANY, _(u"Constraints & Optimization")), wx.VERTICAL)
         fgC = wx.FlexGridSizer(0, 2, 6, 10); fgC.AddGrowableCol(1)
@@ -282,6 +301,9 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnViewSTL = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"View STL (PyVista)"))
         self.m_btnViewSTL.Enable(False)
         szBtns.Add(self.m_btnViewSTL, 0, wx.ALL, 5)
+        self.m_btnSyncOptField = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Sync Opt Field →ParaPy"))
+        self.m_btnSyncOptField.SetToolTip(_(u"Read the optimised kx/ky/kz wavenumber field from the server config and apply it to the live ParaPy gyroid preview and local STL export"))
+        szBtns.Add(self.m_btnSyncOptField, 0, wx.ALL, 5)
         self.m_btnQuadMesh = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Quad Mesh Export (STEP)…"))
         szBtns.Add(self.m_btnQuadMesh, 0, wx.ALL, 5)
         self.m_btnPySLM = wx.Button(self.m_panelResults, wx.ID_ANY, _(u"Run PySLM"))
@@ -303,6 +325,77 @@ class WorkflowWizardFrame ( wx.Frame ):
         szRes.Add(self.m_webviewResults, 1, wx.EXPAND|wx.ALL, 10)
         self.m_panelResults.SetSizer(szRes); self.m_panelResults.Layout(); szRes.Fit(self.m_panelResults)
         self.m_simplebook.AddPage(self.m_panelResults, u"Results", False)
+
+        # =============================================================
+        # PAGE 6 — Print Preparation (PySLM / server-side)
+        # =============================================================
+        self.m_panelPrintPrep = wx.ScrolledWindow(self.m_simplebook, style=wx.VSCROLL)
+        self.m_panelPrintPrep.SetScrollRate(0, 10)
+        szPP = wx.BoxSizer(wx.VERTICAL)
+
+        # -- parameters --
+        sbPPParams = wx.StaticBoxSizer(wx.StaticBox(self.m_panelPrintPrep, wx.ID_ANY, _(u"Print Prep Parameters")), wx.VERTICAL)
+        fgPP = wx.FlexGridSizer(0, 4, 6, 10); fgPP.AddGrowableCol(1); fgPP.AddGrowableCol(3)
+
+        fgPP.Add(wx.StaticText(sbPPParams.GetStaticBox(), wx.ID_ANY, _(u"Parallel workers:")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinPPWorkers = wx.SpinCtrl(sbPPParams.GetStaticBox(), wx.ID_ANY, u"1", wx.DefaultPosition, wx.Size(70,-1), wx.SP_ARROW_KEYS, 1, 32, 1)
+        self.m_spinPPWorkers.SetToolTip(_(u"Worker processes for parallel slicing & hatching (--num-workers)"))
+        fgPP.Add(self.m_spinPPWorkers, 0, wx.EXPAND)
+
+        fgPP.Add(wx.StaticText(sbPPParams.GetStaticBox(), wx.ID_ANY, _(u"Max bridge length (mm):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_spinPPBridge = wx.SpinCtrlDouble(sbPPParams.GetStaticBox(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(90,-1), wx.SP_ARROW_KEYS, 0.1, 50.0, 1.5, 0.1)
+        self.m_spinPPBridge.SetToolTip(_(u"Self-supporting span (mm) before a downskin island needs support (--max-bridge-length)"))
+        fgPP.Add(self.m_spinPPBridge, 0, wx.EXPAND)
+
+        fgPP.Add(wx.StaticText(sbPPParams.GetStaticBox(), wx.ID_ANY, _(u"Build direction:")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_choicePPBuildDir = wx.Choice(sbPPParams.GetStaticBox(), wx.ID_ANY, choices=[u"z", u"x", u"y", u"custom…"])
+        self.m_choicePPBuildDir.SetSelection(0)
+        self.m_choicePPBuildDir.SetToolTip(_(u"LPBF build-up direction (--build-direction). Select 'custom…' to enter a vector bx,by,bz."))
+        fgPP.Add(self.m_choicePPBuildDir, 0, wx.EXPAND)
+
+        fgPP.Add(wx.StaticText(sbPPParams.GetStaticBox(), wx.ID_ANY, _(u"Custom vector (bx,by,bz):")), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.m_txtPPCustomDir = wx.TextCtrl(sbPPParams.GetStaticBox(), wx.ID_ANY, u"0,0,1", wx.DefaultPosition, wx.Size(90,-1))
+        self.m_txtPPCustomDir.SetToolTip(_(u"Build direction vector, e.g. '0.707,0,0.707'. Only used when 'custom…' is selected above."))
+        fgPP.Add(self.m_txtPPCustomDir, 0, wx.EXPAND)
+
+        sbPPParams.Add(fgPP, 0, wx.EXPAND|wx.ALL, 5)
+        self.m_chkPPSkipTime = wx.CheckBox(sbPPParams.GetStaticBox(), wx.ID_ANY, _(u"Skip print-time estimate  (faster, omits the layer-by-layer slicing pass)"))
+        sbPPParams.Add(self.m_chkPPSkipTime, 0, wx.ALL, 5)
+        szPP.Add(sbPPParams, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- action buttons --
+        szPPAct = wx.BoxSizer(wx.HORIZONTAL)
+        self.m_btnRunPrintPrep = wx.Button(self.m_panelPrintPrep, wx.ID_ANY, _(u"Run Print Prep"))
+        self.m_btnRunPrintPrep.SetToolTip(_(u"Run gyroid_print_prep.py on the server — generates build/overhang/supports STL files"))
+        szPPAct.Add(self.m_btnRunPrintPrep, 0, wx.ALL, 5)
+        self.m_btnStopPrintPrep = wx.Button(self.m_panelPrintPrep, wx.ID_ANY, _(u"Stop"))
+        self.m_btnStopPrintPrep.Enable(False)
+        szPPAct.Add(self.m_btnStopPrintPrep, 0, wx.ALL, 5)
+        szPP.Add(szPPAct, 0, wx.ALL, 5)
+
+        # -- log --
+        self.m_txtPrintPrepLog = wx.TextCtrl(self.m_panelPrintPrep, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size(-1,200), wx.TE_MULTILINE|wx.TE_READONLY|wx.HSCROLL)
+        self.m_txtPrintPrepLog.SetFont(mono)
+        szPP.Add(self.m_txtPrintPrepLog, 0, wx.EXPAND|wx.ALL, 5)
+
+        # -- download outputs --
+        sbPPDl = wx.StaticBoxSizer(wx.StaticBox(self.m_panelPrintPrep, wx.ID_ANY, _(u"Download Outputs  (enabled after successful run)")), wx.HORIZONTAL)
+        self.m_btnDownloadBuildSTL = wx.Button(sbPPDl.GetStaticBox(), wx.ID_ANY, _(u"Build STL"))
+        self.m_btnDownloadBuildSTL.SetToolTip(_(u"Download <stem>_build.stl — mesh re-oriented into the build direction"))
+        self.m_btnDownloadBuildSTL.Enable(False)
+        sbPPDl.Add(self.m_btnDownloadBuildSTL, 0, wx.ALL, 5)
+        self.m_btnDownloadOverhangSTL = wx.Button(sbPPDl.GetStaticBox(), wx.ID_ANY, _(u"Overhang STL"))
+        self.m_btnDownloadOverhangSTL.SetToolTip(_(u"Download <stem>_overhang.stl — downskin / overhang surfaces"))
+        self.m_btnDownloadOverhangSTL.Enable(False)
+        sbPPDl.Add(self.m_btnDownloadOverhangSTL, 0, wx.ALL, 5)
+        self.m_btnDownloadSupportsSTL = wx.Button(sbPPDl.GetStaticBox(), wx.ID_ANY, _(u"Supports STL"))
+        self.m_btnDownloadSupportsSTL.SetToolTip(_(u"Download <stem>_supports.stl — generated support structures"))
+        self.m_btnDownloadSupportsSTL.Enable(False)
+        sbPPDl.Add(self.m_btnDownloadSupportsSTL, 0, wx.ALL, 5)
+        szPP.Add(sbPPDl, 0, wx.EXPAND|wx.ALL, 5)
+
+        self.m_panelPrintPrep.SetSizer(szPP); self.m_panelPrintPrep.Layout(); self.m_panelPrintPrep.FitInside()
+        self.m_simplebook.AddPage(self.m_panelPrintPrep, u"Print Prep", False)
 
         # =============================================================
         # Footer
@@ -335,12 +428,18 @@ class WorkflowWizardFrame ( wx.Frame ):
         self.m_btnStartOpt.Bind(wx.EVT_BUTTON, self.onStartOpt)
         self.m_btnExportSTL.Bind(wx.EVT_BUTTON, self.onExportSTL)
         self.m_btnViewSTL.Bind(wx.EVT_BUTTON, self.onViewSTL)
+        self.m_btnSyncOptField.Bind(wx.EVT_BUTTON, self.onSyncOptimizedField)
         self.m_btnQuadMesh.Bind(wx.EVT_BUTTON, self.onQuadMeshExport)
         self.m_btnPySLM.Bind(wx.EVT_BUTTON, self.onRunPySLM)
         self.m_btnDownloadHist.Bind(wx.EVT_BUTTON, self.onDownloadHistory)
         self.m_btnServerStatus.Bind(wx.EVT_BUTTON, self.onServerStatus)
         self.m_btnListFiles.Bind(wx.EVT_BUTTON, self.onListFiles)
         self.m_btnDownloadApp.Bind(wx.EVT_BUTTON, self.onDownloadApp)
+        self.m_btnRunPrintPrep.Bind(wx.EVT_BUTTON, self.onRunPrintPrep)
+        self.m_btnStopPrintPrep.Bind(wx.EVT_BUTTON, self.onStopPrintPrep)
+        self.m_btnDownloadBuildSTL.Bind(wx.EVT_BUTTON, self.onDownloadBuildSTL)
+        self.m_btnDownloadOverhangSTL.Bind(wx.EVT_BUTTON, self.onDownloadOverhangSTL)
+        self.m_btnDownloadSupportsSTL.Bind(wx.EVT_BUTTON, self.onDownloadSupportsSTL)
 
     def __del__( self ): pass
     def onBack( self, event ): event.Skip()
@@ -354,12 +453,18 @@ class WorkflowWizardFrame ( wx.Frame ):
     def onStartOpt( self, event ): event.Skip()
     def onExportSTL( self, event ): event.Skip()
     def onViewSTL( self, event ): event.Skip()
+    def onSyncOptimizedField( self, event ): event.Skip()
     def onQuadMeshExport( self, event ): event.Skip()
     def onRunPySLM( self, event ): event.Skip()
     def onDownloadHistory( self, event ): event.Skip()
     def onServerStatus( self, event ): event.Skip()
     def onListFiles( self, event ): event.Skip()
     def onDownloadApp( self, event ): event.Skip()
+    def onRunPrintPrep( self, event ): event.Skip()
+    def onStopPrintPrep( self, event ): event.Skip()
+    def onDownloadBuildSTL( self, event ): event.Skip()
+    def onDownloadOverhangSTL( self, event ): event.Skip()
+    def onDownloadSupportsSTL( self, event ): event.Skip()
 
 ###########################################################################
 ## Class QuadMeshExportDialog
